@@ -156,12 +156,17 @@ namespace Patch
 	extern std::vector<PatchInfo> GetPatchInfo(const std::string_view serial, u32 crc, bool cheats, bool showAllCRCS, u32* num_unlabelled_patches);
 
 	/// Returns the path to a new cheat/patch pnach for the specified serial and CRC.
+	/// Serial-only filenames are preferred when the serial is known.
 	extern std::string GetPnachFilename(const std::string_view serial, u32 crc, bool cheats);
 
 	/// Reloads cheats/patches. If verbose is set, the number of patches loaded will be shown in the OSD.
 	extern void ReloadPatches(const std::string& serial, u32 crc, bool reload_files, bool reload_enabled_list, bool verbose, bool verbose_if_changed);
 
 	extern void UpdateActivePatches(bool reload_enabled_list, bool verbose, bool verbose_if_changed, bool apply_new_patches);
+	extern std::vector<std::string> GetEnabledCheats();
+	extern bool GetCheatsGloballyEnabled();
+	extern bool SetCheatEnabled(const std::string_view name, bool enabled, bool verbose, bool apply_new_patches);
+	extern void SetCheatsGloballyEnabled(bool enabled, bool verbose, bool apply_new_patches);
 	extern void ApplyPatchSettingOverrides();
 	extern bool ReloadPatchAffectingOptions();
 	extern void UnloadPatches();

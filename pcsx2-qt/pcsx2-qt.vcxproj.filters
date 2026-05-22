@@ -49,6 +49,7 @@
     <ClCompile Include="DisplayWidget.cpp" />
     <ClCompile Include="QtUtils.cpp" />
     <ClCompile Include="QtKeyCodes.cpp" />
+    <ClCompile Include="TimeSaveWindow.cpp" />
     <ClCompile Include="Settings\BIOSSettingsWidget.cpp">
       <Filter>Settings</Filter>
     </ClCompile>
@@ -89,6 +90,7 @@
       <Filter>Settings</Filter>
     </ClCompile>
     <ClCompile Include="AboutDialog.cpp" />
+    <ClCompile Include="CheatTrainerWindow.cpp" />
     <ClCompile Include="GameList\GameListRefreshThread.cpp">
       <Filter>GameList</Filter>
     </ClCompile>
@@ -312,6 +314,7 @@
   <ItemGroup>
     <QtMoc Include="MainWindow.h" />
     <QtMoc Include="DisplayWidget.h" />
+    <QtMoc Include="TimeSaveWindow.h" />
     <QtMoc Include="Settings\BIOSSettingsWidget.h">
       <Filter>Settings</Filter>
     </QtMoc>
@@ -349,6 +352,7 @@
       <Filter>Settings</Filter>
     </QtMoc>
     <QtMoc Include="AboutDialog.h" />
+    <QtMoc Include="CheatTrainerWindow.h" />
     <QtMoc Include="GameList\GameListWidget.h">
       <Filter>GameList</Filter>
     </QtMoc>

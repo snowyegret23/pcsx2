@@ -18,11 +18,14 @@
 #include "ui_MainWindow.h"
 
 class QProgressBar;
+class QAction;
 
 class AutoUpdaterDialog;
+class CheatTrainerWindow;
 class DisplaySurface;
 class DisplayContainer;
 class GameListWidget;
+class TimeSaveWindow;
 class ControllerSettingsWindow;
 
 class EmuThread;
@@ -179,6 +182,8 @@ private Q_SLOTS:
 	void onCreateGameShortcutTriggered();
 #endif
 	void onToolsEditCheatsPatchesTriggered(bool cheats);
+	void onToolsCheatTrainerTriggered();
+	void onToolsTimeSaveTriggered();
 	void onCreateMemoryCardOpenRequested();
 	void updateTheme();
 	void reloadThemeSpecificImages();
@@ -305,6 +310,8 @@ private:
 	ControllerSettingsWindow* m_controller_settings_window = nullptr;
 	InputRecordingViewer* m_input_recording_viewer = nullptr;
 	AutoUpdaterDialog* m_auto_updater_dialog = nullptr;
+	CheatTrainerWindow* m_cheat_trainer_window = nullptr;
+	TimeSaveWindow* m_time_save_window = nullptr;
 
 	QProgressBar* m_status_progress_widget = nullptr;
 	QLabel* m_status_verbose_widget = nullptr;
@@ -315,6 +322,8 @@ private:
 	QLabel* m_status_resolution_widget = nullptr;
 
 	QMenu* m_settings_toolbar_menu = nullptr;
+	QAction* m_cheat_trainer_action = nullptr;
+	QAction* m_time_save_action = nullptr;
 
 	bool m_display_created = false;
 	bool m_display_is_exclusive_fullscreen = false;

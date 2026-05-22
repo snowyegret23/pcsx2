@@ -8,6 +8,8 @@
 #include "Counters.h"
 #include "DEV9/DEV9.h"
 #include "DebugTools/DebugInterface.h"
+#include "DebugTools/DebugServer.h"
+#include "DebugTools/GDBServer.h"
 #include "DebugTools/SymbolImporter.h"
 #include "Elfheader.h"
 #include "FW.h"
@@ -134,6 +136,8 @@ namespace VMManager
 	static void ResetResumeTimestamp();
 	static void SaveSessionTime(const std::string& prev_serial);
 	static void ReloadPINE();
+	static void ReloadGDBServers();
+	static void ShutdownGDBServers();
 
 	static float GetTargetSpeedForLimiterMode(LimiterModeType mode);
 	static void ResetFrameLimiter();
@@ -422,6 +426,7 @@ bool VMManager::Internal::CPUThreadInitialize()
 		Achievements::Initialize();
 
 	ReloadPINE();
+	ReloadGDBServers();
 
 	if (EmuConfig.EnableDiscordPresence)
 		InitializeDiscordPresence();
@@ -436,6 +441,8 @@ bool VMManager::Internal::CPUThreadInitialize()
 void VMManager::Internal::CPUThreadShutdown()
 {
 	ShutdownDiscordPresence();
+
+	ShutdownGDBServers();
 
 	PINEServer::Deinitialize();
 
@@ -1155,6 +1162,7 @@ void VMManager::UpdateDiscDetails(bool booting)
 	{
 		Achievements::GameChanged(s_disc_crc, s_current_crc);
 		ReloadPINE();
+		ReloadGDBServers();
 		UpdateDiscordPresence(s_state.load(std::memory_order_relaxed) == VMState::Initializing);
 		FileMcd_Reopen(memcardFilters.empty() ? s_disc_serial : memcardFilters);
 	}
@@ -3105,6 +3113,14 @@ void VMManager::CheckForMiscConfigChanges(const Pcsx2Config& old_config)
 			ShutdownDiscordPresence();
 	}
 
+	if (EmuConfig.EnableEEGDBServer != old_config.EnableEEGDBServer ||
+		EmuConfig.EnableIOPGDBServer != old_config.EnableIOPGDBServer ||
+		EmuConfig.EEGDBServerPort != old_config.EEGDBServerPort ||
+		EmuConfig.IOPGDBServerPort != old_config.IOPGDBServerPort)
+	{
+		ReloadGDBServers();
+	}
+
 	if (HasValidVM() && (EmuConfig.EnableThreadPinning != old_config.EnableThreadPinning ||
 							(s_thread_affinities_set && EmuConfig.Speedhacks.vuThread != old_config.Speedhacks.vuThread)))
 	{
@@ -3765,6 +3781,36 @@ void VMManager::ReloadPINE()
 
 	if (EmuConfig.EnablePINE)
 		PINEServer::Initialize(EmuConfig.PINESlot);
+}
+
+void VMManager::ReloadGDBServers()
+{
+	const bool ee_needs_reinit =
+		(EmuConfig.EnableEEGDBServer != EEDebugNetworkServer.isRunning() ||
+		 (EmuConfig.EnableEEGDBServer && EEDebugNetworkServer.getPort() != EmuConfig.EEGDBServerPort));
+	const bool iop_needs_reinit =
+		(EmuConfig.EnableIOPGDBServer != IOPDebugNetworkServer.isRunning() ||
+		 (EmuConfig.EnableIOPGDBServer && IOPDebugNetworkServer.getPort() != EmuConfig.IOPGDBServerPort));
+
+	if (ee_needs_reinit)
+	{
+		EEDebugNetworkServer.shutdown();
+		if (EmuConfig.EnableEEGDBServer)
+			EEDebugNetworkServer.init("EE", std::make_unique<GDBServer>(&r5900Debug), EmuConfig.EEGDBServerPort, "127.0.0.1");
+	}
+
+	if (iop_needs_reinit)
+	{
+		IOPDebugNetworkServer.shutdown();
+		if (EmuConfig.EnableIOPGDBServer)
+			IOPDebugNetworkServer.init("IOP", std::make_unique<GDBServer>(&r3000Debug), EmuConfig.IOPGDBServerPort, "127.0.0.1");
+	}
+}
+
+void VMManager::ShutdownGDBServers()
+{
+	IOPDebugNetworkServer.shutdown();
+	EEDebugNetworkServer.shutdown();
 }
 
 void VMManager::InitializeDiscordPresence()

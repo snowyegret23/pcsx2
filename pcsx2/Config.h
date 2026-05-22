@@ -1346,6 +1346,8 @@ struct Pcsx2Config
 		EnablePatches : 1, // enables patch detection and application
 		EnableCheats : 1, // enables cheat detection and application
 		EnablePINE : 1, // enables inter-process communication
+		EnableEEGDBServer : 1, // enables EE GDB remote debugging
+		EnableIOPGDBServer : 1, // enables IOP GDB remote debugging
 		EnableWideScreenPatches : 1,
 		EnableNoInterlacingPatches : 1,
 		EnableFastBoot : 1,
@@ -1392,6 +1394,8 @@ struct Pcsx2Config
 	std::string GzipIsoIndexTemplate; // for quick-access index with gzipped ISO
 
 	int PINESlot;
+	int EEGDBServerPort;
+	int IOPGDBServerPort;
 
 	int RtcYear;
 	int RtcMonth;

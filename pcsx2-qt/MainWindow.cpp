@@ -3,6 +3,7 @@
 
 #include "AboutDialog.h"
 #include "AutoUpdaterDialog.h"
+#include "CheatTrainerWindow.h"
 #include "CoverDownloadDialog.h"
 #include "DisplayWidget.h"
 #include "GameList/GameListRefreshThread.h"
@@ -18,6 +19,7 @@
 #include "Settings/GameListSettingsWidget.h"
 #include "Settings/InterfaceSettingsWidget.h"
 #include "Settings/MemoryCardCreateDialog.h"
+#include "TimeSaveWindow.h"
 #include "Tools/InputRecording/InputRecordingViewer.h"
 #include "Tools/InputRecording/NewInputRecordingDlg.h"
 
@@ -50,6 +52,7 @@
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtGui/QCloseEvent>
+#include <QtGui/QIcon>
 #include <QtWidgets/QFileDialog>
 #include <QtWidgets/QInputDialog>
 #include <QtWidgets/QMessageBox>
@@ -251,6 +254,11 @@ void MainWindow::setupAdditionalUi()
 	m_settings_toolbar_menu->addAction(m_ui.actionSettings);
 	m_settings_toolbar_menu->addAction(m_ui.actionViewGameProperties);
 
+	m_cheat_trainer_action = new QAction(QIcon::fromTheme(QStringLiteral("gamepad-line")), tr("Cheat Trainer..."), this);
+	m_ui.menuTools->insertAction(m_ui.actionReloadPatches, m_cheat_trainer_action);
+	m_time_save_action = new QAction(QIcon::fromTheme(QStringLiteral("document-save")), tr("Time Saves..."), this);
+	m_ui.menuTools->insertAction(m_ui.actionReloadPatches, m_time_save_action);
+
 	for (u32 scale = 0; scale <= 10; scale++)
 	{
 		QAction* action = m_ui.menuWindowSize->addAction((scale == 0) ? tr("Internal Resolution") : tr("%1x Scale").arg(scale));
@@ -413,6 +421,8 @@ void MainWindow::connectSignals()
 	connect(m_ui.actionVideoCapture, &QAction::toggled, this, &MainWindow::onVideoCaptureToggled);
 	connect(m_ui.actionEditPatches, &QAction::triggered, this, [this]() { onToolsEditCheatsPatchesTriggered(false); });
 	connect(m_ui.actionEditCheats, &QAction::triggered, this, [this]() { onToolsEditCheatsPatchesTriggered(true); });
+	connect(m_cheat_trainer_action, &QAction::triggered, this, &MainWindow::onToolsCheatTrainerTriggered);
+	connect(m_time_save_action, &QAction::triggered, this, &MainWindow::onToolsTimeSaveTriggered);
 
 	// Input Recording
 	connect(m_ui.actionInputRecNew, &QAction::triggered, this, &MainWindow::onInputRecNewActionTriggered);
@@ -624,6 +634,20 @@ void MainWindow::destroySubWindows()
 		m_settings_window->close();
 		m_settings_window->deleteLater();
 		m_settings_window = nullptr;
+	}
+
+	if (m_cheat_trainer_window)
+	{
+		m_cheat_trainer_window->close();
+		m_cheat_trainer_window->deleteLater();
+		m_cheat_trainer_window = nullptr;
+	}
+
+	if (m_time_save_window)
+	{
+		m_time_save_window->close();
+		m_time_save_window->deleteLater();
+		m_time_save_window = nullptr;
 	}
 
 	SettingsWindow::closeGamePropertiesDialogs();
@@ -1947,6 +1971,36 @@ void MainWindow::onToolsEditCheatsPatchesTriggered(bool cheats)
 	QtUtils::OpenURL(this, QUrl::fromLocalFile(QString::fromStdString(path)));
 }
 
+void MainWindow::onToolsCheatTrainerTriggered()
+{
+	if (s_current_disc_serial.isEmpty() || s_current_running_crc == 0)
+		return;
+
+	if (!m_cheat_trainer_window)
+		m_cheat_trainer_window = new CheatTrainerWindow(this, s_current_disc_serial, s_current_running_crc);
+	else
+		m_cheat_trainer_window->setGame(s_current_disc_serial, s_current_running_crc);
+
+	m_cheat_trainer_window->show();
+	m_cheat_trainer_window->raise();
+	m_cheat_trainer_window->activateWindow();
+}
+
+void MainWindow::onToolsTimeSaveTriggered()
+{
+	if (s_current_disc_serial.isEmpty())
+		return;
+
+	if (!m_time_save_window)
+		m_time_save_window = new TimeSaveWindow(this, s_current_disc_serial);
+	else
+		m_time_save_window->setGame(s_current_disc_serial);
+
+	m_time_save_window->show();
+	m_time_save_window->raise();
+	m_time_save_window->activateWindow();
+}
+
 void MainWindow::onCreateMemoryCardOpenRequested()
 {
 	// This can be invoked via big picture, so exit fullscreen.
@@ -2231,6 +2285,10 @@ void MainWindow::onVMStopped()
 	updateWindowState();
 	updateStatusBarWidgetVisibility();
 	updateInputRecordingActions(false);
+	if (m_cheat_trainer_window)
+		m_cheat_trainer_window->setGame(QString(), 0);
+	if (m_time_save_window)
+		m_time_save_window->setGame(QString());
 
 	// If we're closing or in batch mode, quit the whole application now.
 	if (m_is_closing || Host::InBatchMode())
@@ -2258,6 +2316,10 @@ void MainWindow::onGameChanged(const QString& title, const QString& elf_override
 	s_current_disc_serial = serial;
 	s_current_disc_crc = disc_crc;
 	s_current_running_crc = crc;
+	if (m_cheat_trainer_window)
+		m_cheat_trainer_window->setGame(s_current_disc_serial, s_current_running_crc);
+	if (m_time_save_window)
+		m_time_save_window->setGame(s_current_disc_serial);
 	updateWindowTitle();
 	updateGameDependentActions();
 }
@@ -3425,6 +3487,10 @@ void MainWindow::updateGameDependentActions()
 	const bool can_use_pnach = (s_vm_valid && !s_current_disc_serial.isEmpty() && s_current_running_crc != 0);
 	m_ui.actionEditCheats->setEnabled(can_use_pnach);
 	m_ui.actionEditPatches->setEnabled(can_use_pnach);
+	if (m_cheat_trainer_action)
+		m_cheat_trainer_action->setEnabled(can_use_pnach);
+	if (m_time_save_action)
+		m_time_save_action->setEnabled(s_vm_valid && !s_current_disc_serial.isEmpty());
 	m_ui.actionReloadPatches->setEnabled(s_vm_valid);
 }
 

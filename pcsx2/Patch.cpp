@@ -90,6 +90,7 @@ namespace Patch
 
 	static bool ContainsPatchName(const std::vector<PatchInfo>& patches, const std::string_view patchName);
 	static bool ContainsPatchName(const std::vector<PatchGroup>& patches, const std::string_view patchName);
+	static void AppendUniquePath(std::vector<std::string>* paths, std::string path);
 
 	template <typename F>
 	static void EnumeratePnachFiles(const std::string_view serial, u32 crc, bool cheats, bool for_ui, const F& f);
@@ -330,10 +331,17 @@ std::string Patch::GetPnachTemplate(const std::string_view serial, u32 crc, bool
 	return fmt::format("{:08X}{}.pnach", crc, add_wildcard ? "*" : "");
 }
 
+void Patch::AppendUniquePath(std::vector<std::string>* paths, std::string path)
+{
+	if (std::find(paths->begin(), paths->end(), path) == paths->end())
+		paths->push_back(std::move(path));
+}
+
 std::vector<std::string> Patch::FindPatchFilesOnDisk(const std::string_view serial, u32 crc, bool cheats, bool all_crcs)
 {
+	const char* directory = cheats ? EmuFolders::Cheats.c_str() : EmuFolders::Patches.c_str();
 	FileSystem::FindResultsArray files;
-	FileSystem::FindFiles(cheats ? EmuFolders::Cheats.c_str() : EmuFolders::Patches.c_str(),
+	FileSystem::FindFiles(directory,
 		GetPnachTemplate(serial, crc, true, true, all_crcs).c_str(),
 		FILESYSTEM_FIND_FILES | FILESYSTEM_FIND_HIDDEN_FILES, &files);
 
@@ -341,15 +349,25 @@ std::vector<std::string> Patch::FindPatchFilesOnDisk(const std::string_view seri
 	ret.reserve(files.size());
 
 	for (FILESYSTEM_FIND_DATA& fd : files)
-		ret.push_back(std::move(fd.FileName));
+		AppendUniquePath(&ret, std::move(fd.FileName));
+
+	// Serial-only files apply to the executable regardless of CRC.
+	if (!serial.empty())
+	{
+		FileSystem::FindFiles(directory, fmt::format("{}.pnach", serial).c_str(),
+			FILESYSTEM_FIND_FILES | FILESYSTEM_FIND_HIDDEN_FILES, &files);
+		ret.reserve(ret.size() + files.size());
+		for (FILESYSTEM_FIND_DATA& fd : files)
+			AppendUniquePath(&ret, std::move(fd.FileName));
+	}
 
 	// and patches without serials
-	FileSystem::FindFiles(cheats ? EmuFolders::Cheats.c_str() : EmuFolders::Patches.c_str(),
+	FileSystem::FindFiles(directory,
 		GetPnachTemplate(serial, crc, false, true, false).c_str(), FILESYSTEM_FIND_FILES | FILESYSTEM_FIND_HIDDEN_FILES,
 		&files);
 	ret.reserve(ret.size() + files.size());
 	for (FILESYSTEM_FIND_DATA& fd : files)
-		ret.push_back(std::move(fd.FileName));
+		AppendUniquePath(&ret, std::move(fd.FileName));
 
 	return ret;
 }
@@ -396,6 +414,11 @@ void Patch::EnumeratePnachFiles(const std::string_view serial, u32 crc, bool che
 	// Prefer filename with serial.
 	std::string zip_filename = GetPnachTemplate(serial, crc, true, false, false);
 	std::optional<std::string> pnach_data(ReadFileInZipToString(s_patches_zip, zip_filename.c_str()));
+	if (!pnach_data.has_value() && !serial.empty())
+	{
+		zip_filename = fmt::format("{}.pnach", serial);
+		pnach_data = ReadFileInZipToString(s_patches_zip, zip_filename.c_str());
+	}
 	if (!pnach_data.has_value())
 	{
 		zip_filename = GetPnachTemplate(serial, crc, false, false, false);
@@ -579,7 +602,8 @@ std::vector<Patch::PatchInfo> Patch::GetPatchInfo(const std::string_view serial,
 
 std::string Patch::GetPnachFilename(const std::string_view serial, u32 crc, bool cheats)
 {
-	return Path::Combine(cheats ? EmuFolders::Cheats : EmuFolders::Patches, GetPnachTemplate(serial, crc, true, false, false));
+	return Path::Combine(cheats ? EmuFolders::Cheats : EmuFolders::Patches,
+		serial.empty() ? GetPnachTemplate(serial, crc, false, false, false) : fmt::format("{}.pnach", serial));
 }
 
 void Patch::ReloadEnabledLists()
@@ -815,6 +839,54 @@ void Patch::UpdateActivePatches(bool reload_enabled_list, bool verbose, bool ver
 
 	if ((!s_active_gamedb_dynamic_patches.empty() || !s_active_pnach_dynamic_patches.empty()) && Cpu)
 		Cpu->Reset();
+}
+
+std::vector<std::string> Patch::GetEnabledCheats()
+{
+	return s_enabled_cheats;
+}
+
+bool Patch::GetCheatsGloballyEnabled()
+{
+	return EmuConfig.EnableCheats;
+}
+
+bool Patch::SetCheatEnabled(const std::string_view name, bool enabled, bool verbose, bool apply_new_patches)
+{
+	if (name.empty() || !ContainsPatchName(s_cheat_patches, name))
+		return false;
+
+	const auto it = std::find_if(s_enabled_cheats.begin(), s_enabled_cheats.end(),
+		[name](const std::string& item) { return item == name; });
+	const bool was_enabled = (it != s_enabled_cheats.end());
+	if (enabled == was_enabled)
+		return true;
+
+	if (enabled)
+	{
+		s_enabled_cheats.emplace_back(name);
+		s_just_enabled_cheats.emplace_back(name);
+	}
+	else
+	{
+		s_enabled_cheats.erase(it);
+		const auto just_it = std::find_if(s_just_enabled_cheats.begin(), s_just_enabled_cheats.end(),
+			[name](const std::string& item) { return item == name; });
+		if (just_it != s_just_enabled_cheats.end())
+			s_just_enabled_cheats.erase(just_it);
+	}
+
+	UpdateActivePatches(false, verbose, true, apply_new_patches);
+	return true;
+}
+
+void Patch::SetCheatsGloballyEnabled(bool enabled, bool verbose, bool apply_new_patches)
+{
+	if (EmuConfig.EnableCheats == enabled)
+		return;
+
+	EmuConfig.EnableCheats = enabled;
+	UpdateActivePatches(false, verbose, true, apply_new_patches);
 }
 
 void Patch::ApplyPatchSettingOverrides()

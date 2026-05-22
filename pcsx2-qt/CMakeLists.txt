@@ -15,6 +15,8 @@ target_sources(pcsx2-qt PRIVATE
 	AutoUpdaterDialog.cpp
 	AutoUpdaterDialog.h
 	AutoUpdaterDialog.ui
+	CheatTrainerWindow.cpp
+	CheatTrainerWindow.h
 	ColorPickerButton.cpp
 	ColorPickerButton.h
 	CoverDownloadDialog.cpp
@@ -35,6 +37,8 @@ target_sources(pcsx2-qt PRIVATE
 	SetupWizardDialog.h
 	SetupWizardDialog.ui
 	Themes.cpp
+	TimeSaveWindow.cpp
+	TimeSaveWindow.h
 	Translations.cpp
 	QtHost.cpp
 	QtHost.h
