@@ -14,11 +14,6 @@ option(USE_VTUNE "Plug VTUNE to profile GS JIT.")
 option(PACKAGE_MODE "Use this option to ease packaging of PCSX2 (developer/distribution option)")
 option(BUNDLE_EMOJI_FONT "Bundles Noto Color Emoji for systems whose system emoji font isn't usable by freetype" ON)
 option(POSITION_INDEPENDENT_CODE "Generate position-independent code. It is recommended that you leave this on." ON)
-set(PCSX2_VERSION_OVERRIDE "" CACHE STRING "Override the generated PCSX2 version string, e.g. v2.6.3.")
-set(PCSX2_SAVE_VERSION_OVERRIDE "" CACHE STRING "Override the savestate compatibility version, e.g. 0x9A550000.")
-if(PCSX2_SAVE_VERSION_OVERRIDE)
-	list(APPEND PCSX2_DEFS "PCSX2_SAVE_VERSION_OVERRIDE=${PCSX2_SAVE_VERSION_OVERRIDE}")
-endif()
 
 #-------------------------------------------------------------------------------
 # Graphical option

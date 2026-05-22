@@ -24,6 +24,16 @@ if exist "%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" (
 )
 
 set SEVENZIP="C:\Program Files\7-Zip\7z.exe"
+if not exist %SEVENZIP% (
+  set SEVENZIP=
+  for /f "usebackq tokens=*" %%i in (`where 7z.exe 2^>NUL`) do (
+    if not defined SEVENZIP set SEVENZIP="%%i"
+  )
+  if not defined SEVENZIP (
+    echo 7-Zip not found.
+    goto error
+  )
+)
 set PATCH="C:\Program Files\Git\usr\bin\patch.exe"
 
 if defined DEBUG (

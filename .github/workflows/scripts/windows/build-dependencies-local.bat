@@ -7,12 +7,12 @@ if exist "%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" (
   for /f "usebackq tokens=*" %%i in (`call "%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -version "[17, 18)" -latest -property installationPath`) do set "VSINSTPATH=%%i"
   if defined VSINSTPATH (
     echo VSINSTPATH=!VSINSTPATH!
-    call "!VSINSTPATH!\VC\Auxiliary\Build\vcvarsamd64_arm64.bat" || goto error
+    call "!VSINSTPATH!\VC\Auxiliary\Build\vcvars64.bat" || goto error
   ) else (
     for /f "usebackq tokens=*" %%i in (`call "%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -version "[18, 19)" -latest -property installationPath`) do set "VSINSTPATH=%%i"
     if defined VSINSTPATH (
       echo VSINSTPATH=!VSINSTPATH!
-      call "!VSINSTPATH!\VC\Auxiliary\Build\vcvarsamd64_arm64.bat" || goto error
+      call "!VSINSTPATH!\VC\Auxiliary\Build\vcvars64.bat" || goto error
     ) else (
       echo Visual Studio not found.
       goto error
@@ -24,12 +24,31 @@ if exist "%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" (
 )
 
 set SEVENZIP="C:\Program Files\7-Zip\7z.exe"
+if not exist %SEVENZIP% (
+  set SEVENZIP=
+  for /f "usebackq tokens=*" %%i in (`where 7z.exe 2^>NUL`) do (
+    if not defined SEVENZIP set SEVENZIP="%%i"
+  )
+  if not defined SEVENZIP (
+    echo 7-Zip not found.
+    goto error
+  )
+)
 set PATCH="C:\Program Files\Git\usr\bin\patch.exe"
+set BASH="C:\Program Files\Git\usr\bin\bash.exe"
+
+set "UNIX_TOOLS=C:\Program Files\Git\usr\bin\"
 
 if defined DEBUG (
   echo DEBUG=%DEBUG%
 ) else (
   set DEBUG=1
+)
+
+if defined BUILD_FFMPEG (
+  echo BUILD_FFMPEG=%BUILD_FFMPEG%
+) else (
+  set BUILD_FFMPEG=0
 )
 
 pushd %~dp0
@@ -39,24 +58,32 @@ mkdir deps-build
 cd deps-build || goto error
 set "BUILDDIR=%CD%"
 cd ..
-mkdir deps-arm64
-cd deps-arm64 || goto error
-set "INSTALLDIR=%CD%"
-cd ..
+mkdir deps
 cd deps || goto error
-set "X64INSTALLDIR=%CD%"
-cd ..
+set "INSTALLDIR=%CD%"
 popd
 
 echo SCRIPTDIR=%SCRIPTDIR%
 echo BUILDDIR=%BUILDDIR%
 echo INSTALLDIR=%INSTALLDIR%
 
+set "PATH=%PATH%;%INSTALLDIR%\bin"
+
 cd "%BUILDDIR%"
 
 set QT=6.11.1
 set QTMINOR=6.11
 set QTAPNG=1.3.0
+
+set FFMPEG=8.1
+set MESON=1.10.2
+set PKGCONF=2.5.1
+set AMF=1.5.0
+set LIBVPL=2.16.0
+set NVENC=13.0.19.0
+set LIBOPUS=1.6.1
+set LIBSVTAV1=4.0.1
+set LIBX264=b35605ace3ddf7c1a5d67a2eb553f034aef41d55
 
 set FREETYPE=2.14.3
 set HARFBUZZ=14.2.0
@@ -88,6 +115,16 @@ call :downloadfile "qttools-everywhere-src-%QT%.zip" "https://download.qt.io/off
 call :downloadfile "qttranslations-everywhere-src-%QT%.zip" "https://download.qt.io/official_releases/qt/%QTMINOR%/%QT%/submodules/qttranslations-everywhere-src-%QT%.zip" eef43700ffd079f5893e435aca1330c8bdbf2a94ae45013e3fc63870df53d3b0 || goto error
 call :downloadfile "QtApng-%QTAPNG%.zip" "https://github.com/jurplel/QtApng/archive/refs/tags/%QTAPNG%.zip" 5176082cdd468047a7eb1ec1f106b032f57df207aa318d559b29606b00d159ac || goto error
 
+call :downloadfile "ffmpeg-%FFMPEG%.tar.xz" "https://ffmpeg.org/releases/ffmpeg-%FFMPEG%.tar.xz" b072aed6871998cce9b36e7774033105ca29e33632be5b6347f3206898e0756a || goto error
+call :downloadfile "meson-%MESON%.tar.gz" "https://github.com/mesonbuild/meson/releases/download/%MESON%/meson-%MESON%.tar.gz" 7890287d911dd4ee1ebd0efb61ed0321bfcd87c725df923a837cf90c6508f96b || goto error
+call :downloadfile "pkgconf-pkgconf-%PKGCONF%.zip" "https://github.com/pkgconf/pkgconf/archive/refs/tags/pkgconf-%PKGCONF%.zip" c5b5f88a2ca2324dc5d857e35bb145e24290e326357ea94a86d47b8d7fa15477 || goto error
+call :downloadfile "amf-headers-v%AMF%.tar.gz" "https://github.com/GPUOpen-LibrariesAndSDKs/AMF/releases/download/v%AMF%/AMF-headers-v%AMF%.tar.gz" d569647fa26f289affe81a206259fa92f819d06db1e80cc334559953e82a3f01 || goto error
+call :downloadfile "libvpl-%LIBVPL%.zip" "https://github.com/intel/libvpl/archive/v%LIBVPL%.zip" 0b2ee8da8b9ef07ed4b52bf9ddee05008ec999b7c3c41944d7a9f804631c398e || goto error
+call :downloadfile "nv-codec-headers-%NVENC%.tar.gz" "https://github.com/FFmpeg/nv-codec-headers/releases/download/n%NVENC%/nv-codec-headers-%NVENC%.tar.gz" 13da39edb3a40ed9713ae390ca89faa2f1202c9dda869ef306a8d4383e242bee || goto error
+call :downloadfile "opus-%LIBOPUS%.tar.gz" "https://downloads.xiph.org/releases/opus/opus-%LIBOPUS%.tar.gz" 6ffcb593207be92584df15b32466ed64bbec99109f007c82205f0194572411a1 || goto error
+call :downloadfile "SVT-AV1-v%LIBSVTAV1%.zip" "https://gitlab.com/AOMediaCodec/SVT-AV1/-/archive/v%LIBSVTAV1%/SVT-AV1-v%LIBSVTAV1%.zip" bfafad9af17f87fff75e44ca9b2c10cdd83c576047c3e96229285a8a64c81afc || goto error
+call :downloadfile "x264-%LIBX264%.zip" "https://code.videolan.org/videolan/x264/-/archive/%LIBX264%.zip" d95d059eff81cc565165cd058b66e208f0cc9874106a8fe94a811a66cf8a85a2 || goto error
+
 call :downloadfile "freetype-%FREETYPE%.tar.gz" https://sourceforge.net/projects/freetype/files/freetype2/%FREETYPE%/freetype-%FREETYPE%.tar.gz/download e61b31ab26358b946e767ed7eb7f4bb2e507da1cfefeb7a8861ace7fd5c899a1 || goto error
 call :downloadfile "harfbuzz-%HARFBUZZ%.zip" https://github.com/harfbuzz/harfbuzz/archive/refs/tags/%HARFBUZZ%.zip bb2f83255706b1c92d731541c7cefaf98bb5b93e8f76d16f6deda05225ff20ee || goto error
 call :downloadfile "lpng%LIBPNG%.zip" https://download.sourceforge.net/libpng/lpng1658.zip b32f170855dbbe3e6d9e645af40b538137041773672c3ba3e02db5816c82d376 || goto error
@@ -115,14 +152,158 @@ if %DEBUG%==1 (
   echo Building release libraries...
 )
 
-set FORCEPDB=-DCMAKE_SHARED_LINKER_FLAGS_RELEASE="/DEBUG" -DCMAKE_SHARED_LINKER_FLAGS_MINSIZEREL="/DEBUG"
-set ARM64TOOLCHAIN=-DCMAKE_TOOLCHAIN_FILE="%SCRIPTDIR%\cmake-toolchain-windows-arm64.cmake"
+set FORCEPDB=-DCMAKE_SHARED_LINKER_FLAGS_RELEASE="/DEBUG" -DCMAKE_MODULE_LINKER_FLAGS_RELEASE="/DEBUG" -DCMAKE_SHARED_LINKER_FLAGS_MINSIZEREL="/DEBUG" -DCMAKE_MODULE_LINKER_FLAGS_MINSIZEREL="/DEBUG"
+
+if %BUILD_FFMPEG%==1 (
+  if not "%INSTALLDIR%"=="%INSTALLDIR: =%" (
+    echo FFmpeg does not support building in paths with spaces.
+    goto error
+  )
+
+  where nasm /q
+  set FOUND_NASM=0
+  if !ERRORLEVEL!==0 (
+    set FOUND_NASM=1
+  )
+
+  echo "Installing AMF headers"
+  rmdir /S /Q "amf-headers-v%AMF%"
+  tar -xf "amf-headers-v%AMF%.tar.gz" || goto error
+  xcopy "%BUILDDIR%\amf-headers-v%AMF%\AMF" "%INSTALLDIR%\include\AMF\" /y /s || goto error
+  echo.
+
+  echo "Installing libvpl"
+  rmdir /S /Q "libvpl-%LIBVPL%"
+  %SEVENZIP% x "libvpl-%LIBVPL%.zip" || goto error
+  cd "libvpl-%LIBVPL%" || goto error
+  cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DBUILD_SHARED_LIBS=OFF -DINSTALL_EXAMPLES=OFF -DINSTALL_LIB=OFF -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON -B build -G Ninja || goto error
+  cmake --build build --parallel || goto error
+  ninja -C build install || goto error
+  cd .. || goto error
+
+  echo "Installing libopus"
+  rmdir /S /Q "opus-%LIBOPUS%"
+  tar -xf "opus-%LIBOPUS%.tar.gz" || goto error
+  cd "opus-%LIBOPUS%" || goto error
+  cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DBUILD_SHARED_LIBS=OFF -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON -B build -G Ninja || goto error
+  cmake --build build --parallel || goto error
+  ninja -C build install || goto error
+  cd .. || goto error
+
+  echo "Installing libsvtav1"
+  rmdir /S /Q "SVT-AV1-v%LIBSVTAV1%"
+  tar -xf "SVT-AV1-v%LIBSVTAV1%.zip" || goto error
+  cd "SVT-AV1-v%LIBSVTAV1%" || goto error
+  if !FOUND_NASM!==0 (
+    set LIBSTVAV1_NASM=-DCOMPILE_C_ONLY=ON
+  )
+  cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=OFF -DBUILD_APPS=OFF -DSVT_AV1_LTO=ON !LIBSTVAV1_NASM! -B build -G Ninja || goto error
+  cmake --build build --parallel || goto error
+  ninja -C build install || goto error
+  cd .. || goto error
+
+  echo "Extracting meson"
+  rmdir /S /Q "meson-%MESON%"
+  tar xf "meson-%MESON%.tar.gz" || goto error
+  set MASON_PY=python "%BUILDDIR%\meson-%MESON%\meson.py"
+  !MASON_PY! -v || goto error
+  echo.
+
+  rem Alternatively we could grab pkg-config-lite from chocolatey or WinGet.
+  echo "Installing pkgconf"
+  rmdir /S /Q "pkgconf-pkgconf-%PKGCONF%"
+  %SEVENZIP% x "pkgconf-pkgconf-%PKGCONF%.zip" || goto error
+  cd "pkgconf-pkgconf-%PKGCONF%" || goto error
+  !MASON_PY! setup --buildtype=release --prefix="%INSTALLDIR%" -Dtests=disabled build --backend=ninja || goto error
+  !MASON_PY! compile -C build || goto error
+  ninja -C build install || goto error
+  set PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1
+  set PKG_CONFIG_ALLOW_SYSTEM_LIBS=1
+  Set "PKG_CONFIG_PATH=%INSTALLDIR%\lib\pkgconfig"
+  cd .. || goto error
+
+  set "OLD_PATH=%PATH%"
+  set "PATH=%PATH%;%UNIX_TOOLS%"
+
+  echo "Installing nvenc headers..."
+  rmdir /S /Q "nv-codec-headers-%NVENC%"
+  tar xf "nv-codec-headers-%NVENC%.tar.gz" || goto error
+  where make /q
+  if !ERRORLEVEL!==0 (
+    make -C "nv-codec-headers-%NVENC%" PREFIX="%INSTALLDIR%" install || goto error
+  ) else (
+    set "INSTALLDIR_UNIX=%INSTALLDIR:\=/%"
+    mkdir "%INSTALLDIR%\include\ffnvcodec"
+    mkdir "%INSTALLDIR%\lib\pkgconfig"
+    xcopy "%BUILDDIR%\nv-codec-headers-%NVENC%\include\ffnvcodec\*.h" "%INSTALLDIR%\include\ffnvcodec\" /y || goto error
+    (for /f "usebackq delims=" %%i in ("nv-codec-headers-%NVENC%\ffnvcodec.pc.in") do (
+      set "line=%%i"
+      echo(!line:@@PREFIX@@=!INSTALLDIR_UNIX!!
+    )) > "%INSTALLDIR%\lib\pkgconfig\ffnvcodec.pc" || goto error
+  )
+  echo.
+
+  set CC=cl
+  set CXX=cl
+
+  echo "Installing libx264"
+  rmdir /S /Q "x264-%LIBX264%"
+  %SEVENZIP% x "x264-%LIBX264%.zip" || goto error
+  cd "x264-%LIBX264%" || goto error
+  if !FOUND_NASM!==0 (
+    set LIBX264_NASM=--disable-asm
+  )
+  %BASH% configure --prefix="%INSTALLDIR%" --disable-cli --enable-static --extra-cflags="-MD -w -Os -GL" !LIBX264_NASM! || goto error
+  make -j%NUMBER_OF_PROCESSORS% || goto error
+  make install || goto error
+  cd .. || goto error
+  echo.
+
+  echo "Installing FFmpeg..."
+  rmdir /S /Q "ffmpeg-%FFMPEG%"
+  tar xf "ffmpeg-%FFMPEG%.tar.xz" || goto error
+  cd "ffmpeg-%FFMPEG%"
+  %PATCH% -p1 < "%SCRIPTDIR%\ffmpeg-configure-escape.patch" || goto error
+  if not !FOUND_NASM!==1 (
+    rem MSVC LTO gives linker errors when building without nasm.
+    rem The following patches fixes that issue.
+    %PATCH% -p1 < "%SCRIPTDIR%\ffmpeg-no-nasm-fix-avc-air.patch" || goto error
+    %PATCH% -p1 < "%SCRIPTDIR%\ffmpeg-no-nasm-fix-swc-air.patch" || goto error
+    set FFMPEG_NASM=--disable-x86asm
+  )
+  rem FFmpeg's build seems to choke when extra-cflags contain `\`, so use `/` as the path separator.
+  set VULKAN_INCLUDE=%INSTALLDIR:\=/%/../3rdparty/vulkan/include
+  rem libvpl needs to have advapi32.lib & ole32.lib added as extra libs.
+  rem For some reason QSV requires the hevc parser on windows.
+  rem --enable-small removes the display names of codecs, so instead we specify optflag for minsize
+  %BASH% configure --prefix="%INSTALLDIR%" --disable-all --disable-autodetect --disable-static --enable-shared --disable-debug ^
+    --toolchain=msvc --extra-ldflags="-LTCG" --extra-libs="advapi32.lib ole32.lib" !FFMPEG_NASM! --pkg-config="%INSTALLDIR%\bin\pkgconf.exe" ^
+    --extra-cflags="-MD -GL -I!VULKAN_INCLUDE!" --extra-cxxflags="-MD -GL -I!VULKAN_INCLUDE!" --optflags="-O1" ^
+    --enable-avcodec --enable-avformat --enable-avutil --enable-swresample --enable-swscale ^
+    --enable-gpl --enable-libx264 --enable-libsvtav1 --enable-libopus --enable-vulkan --enable-ffnvcodec --enable-nvenc --enable-libvpl --enable-amf ^
+    --enable-d3d11va --enable-mediafoundation ^
+    --enable-encoder=ffv1,qtrle,libx264*,libsvtav1,aac,flac,libopus,pcm_s16be,pcm_s16le ^
+    --enable-encoder=h264_qsv,hevc_qsv,av1_qsv ^
+    --enable-encoder=h264_nvenc,hevc_nvenc,av1_nvenc ^
+    --enable-encoder=h264_amf,hevc_amf,av1_amf ^
+    --enable-encoder=h264_vulkan,hevc_vulkan,av1_vulkan ^
+    --enable-encoder=h264_mf,hevc_mf,av1_mf ^
+    --enable-parser=hevc ^
+    --enable-muxer=avi,matroska,mov,mp3,mp4,wav ^
+    --enable-protocol=file || goto error
+  make -j%NUMBER_OF_PROCESSORS% || goto error
+  make install || goto error
+  cd ..
+  echo.
+
+  set "PATH=!OLD_PATH!"
+)
 
 echo Building Zlib...
 rmdir /S /Q "zlib-%ZLIB%"
 %SEVENZIP% x "zlib%ZLIBSHORT%.zip" || goto error
 cd "zlib-%ZLIB%" || goto error
-cmake %ARM64TOOLCHAIN% -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DBUILD_SHARED_LIBS=ON -DZLIB_BUILD_EXAMPLES=OFF -B build -G Ninja || goto error
+cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DBUILD_SHARED_LIBS=ON -DZLIB_BUILD_EXAMPLES=OFF -B build -G Ninja || goto error
 cmake --build build --parallel || goto error
 ninja -C build install || goto error
 cd .. || goto error
@@ -134,7 +315,7 @@ rem apng not in released libpng yet
 %SEVENZIP% x "lpng%LIBPNG%-apng.patch.gz" -aoa || goto error
 cd "lpng%LIBPNG%" || goto error
 %PATCH% -p1 < "../libpng-%LIBPNGLONG%-apng.patch" || goto error
-cmake %ARM64TOOLCHAIN% -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DBUILD_SHARED_LIBS=ON -DBUILD_SHARED_LIBS=ON -DPNG_TESTS=OFF -DPNG_STATIC=OFF -DPNG_SHARED=ON -DPNG_TOOLS=OFF -B build -G Ninja || goto error
+cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DBUILD_SHARED_LIBS=ON -DBUILD_SHARED_LIBS=ON -DPNG_TESTS=OFF -DPNG_STATIC=OFF -DPNG_SHARED=ON -DPNG_TOOLS=OFF -B build -G Ninja || goto error
 cmake --build build --parallel || goto error
 ninja -C build install || goto error
 cd .. || goto error
@@ -143,7 +324,7 @@ echo Building libjpegturbo...
 rmdir /S /Q "libjpeg-turbo-%LIBJPEGTURBO%"
 tar -xf "libjpeg-turbo-%LIBJPEGTURBO%.tar.gz" || goto error
 cd "libjpeg-turbo-%LIBJPEGTURBO%" || goto error
-cmake %ARM64TOOLCHAIN% -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DBUILD_SHARED_LIBS=ON -DBUILD_STATIC_LIBS=OFF -B build -G Ninja || goto error
+cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DBUILD_SHARED_LIBS=ON -DBUILD_STATIC_LIBS=OFF -B build -G Ninja || goto error
 cmake --build build --parallel || goto error
 ninja -C build install || goto error
 cd .. || goto error
@@ -153,7 +334,7 @@ rmdir /S /Q "lz4"
 %SEVENZIP% x "lz4-%LZ4%.zip" || goto error
 rename "lz4-%LZ4%" "lz4" || goto error
 cd "lz4" || goto error
-cmake %ARM64TOOLCHAIN% -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DBUILD_SHARED_LIBS=ON -DLZ4_BUILD_CLI=OFF -DLZ4_BUILD_LEGACY_LZ4C=OFF -DCMAKE_C_FLAGS="/wd4711 /wd5045" -B build-dir -G Ninja build/cmake || goto error
+cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DBUILD_SHARED_LIBS=ON -DLZ4_BUILD_CLI=OFF -DLZ4_BUILD_LEGACY_LZ4C=OFF -DCMAKE_C_FLAGS="/wd4711 /wd5045" -B build-dir -G Ninja build/cmake || goto error
 cmake --build build-dir --parallel || goto error
 ninja -C build-dir install || goto error
 cd ..
@@ -162,16 +343,16 @@ echo Building FreeType without HarfBuzz...
 rmdir /S /Q "freetype-%FREETYPE%"
 tar -xf "freetype-%FREETYPE%.tar.gz" || goto error
 cd "freetype-%FREETYPE%" || goto error
-cmake %ARM64TOOLCHAIN% -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DBUILD_SHARED_LIBS=ON -DFT_REQUIRE_ZLIB=TRUE -DFT_REQUIRE_PNG=TRUE -DFT_DISABLE_BZIP2=TRUE -DFT_DISABLE_BROTLI=TRUE -DFT_DISABLE_HARFBUZZ=TRUE -B build -G Ninja || goto error
+cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DBUILD_SHARED_LIBS=ON -DFT_REQUIRE_ZLIB=TRUE -DFT_REQUIRE_PNG=TRUE -DFT_DISABLE_BZIP2=TRUE -DFT_DISABLE_BROTLI=TRUE -DFT_DISABLE_HARFBUZZ=TRUE -B build -G Ninja || goto error
 cmake --build build --parallel || goto error
 ninja -C build install || goto error
 cd .. || goto error
 
 echo Building HarfBuzz...
 rmdir /S /Q "harfbuzz-%HARFBUZZ%"
-%SEVENZIP% x "-x^!harfbuzz-%HARFBUZZ%\README" "harfbuzz-%HARFBUZZ%.zip" || goto error
+%SEVENZIP% x "-x^!harfbuzz-%HARFBUZZ%\README" "-x^!harfbuzz-%HARFBUZZ%\CLAUDE.md" "harfbuzz-%HARFBUZZ%.zip" || goto error
 cd "harfbuzz-%HARFBUZZ%" || goto error
-cmake %ARM64TOOLCHAIN% -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DBUILD_SHARED_LIBS=ON -DHB_BUILD_UTILS=OFF -DHB_BUILD_GPU=OFF -B build -G Ninja || goto error
+cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DBUILD_SHARED_LIBS=ON -DHB_BUILD_UTILS=OFF -DHB_BUILD_GPU=OFF -B build -G Ninja || goto error
 cmake --build build --parallel || goto error
 ninja -C build install || goto error
 cd .. || goto error
@@ -180,7 +361,7 @@ echo Building FreeType with HarfBuzz...
 rmdir /S /Q "freetype-%FREETYPE%"
 tar -xf "freetype-%FREETYPE%.tar.gz" || goto error
 cd "freetype-%FREETYPE%" || goto error
-cmake %ARM64TOOLCHAIN% -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DBUILD_SHARED_LIBS=ON -DFT_REQUIRE_ZLIB=TRUE -DFT_REQUIRE_PNG=TRUE -DFT_DISABLE_BZIP2=TRUE -DFT_DISABLE_BROTLI=TRUE -DFT_REQUIRE_HARFBUZZ=TRUE -B build -G Ninja || goto error
+cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DBUILD_SHARED_LIBS=ON -DFT_REQUIRE_ZLIB=TRUE -DFT_REQUIRE_PNG=TRUE -DFT_DISABLE_BZIP2=TRUE -DFT_DISABLE_BROTLI=TRUE -DFT_REQUIRE_HARFBUZZ=TRUE -B build -G Ninja || goto error
 cmake --build build --parallel || goto error
 ninja -C build install || goto error
 cd .. || goto error
@@ -189,7 +370,7 @@ echo Building Zstandard...
 rmdir /S /Q "zstd-%ZSTD%"
 %SEVENZIP% x "-x^!zstd-%ZSTD%\tests\cli-tests\bin" "zstd-%ZSTD%.zip" || goto error
 cd "zstd-%ZSTD%"
-cmake %ARM64TOOLCHAIN% -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DBUILD_SHARED_LIBS=ON -DZSTD_BUILD_SHARED=ON -DZSTD_BUILD_STATIC=OFF -DZSTD_BUILD_PROGRAMS=OFF -B build -G Ninja build/cmake
+cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DBUILD_SHARED_LIBS=ON -DZSTD_BUILD_SHARED=ON -DZSTD_BUILD_STATIC=OFF -DZSTD_BUILD_PROGRAMS=OFF -B build -G Ninja build/cmake
 cmake --build build --parallel || goto error
 ninja -C build install || goto error
 cd .. || goto error
@@ -198,7 +379,7 @@ echo Building WebP...
 rmdir /S /Q "libwebp-%WEBP%"
 tar -xf "libwebp-%WEBP%.tar.gz" || goto error
 cd "libwebp-%WEBP%" || goto error
-cmake -B build %ARM64TOOLCHAIN% -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DWEBP_BUILD_ANIM_UTILS=OFF -DWEBP_BUILD_CWEBP=OFF -DWEBP_BUILD_DWEBP=OFF -DWEBP_BUILD_GIF2WEBP=OFF -DWEBP_BUILD_IMG2WEBP=OFF -DWEBP_BUILD_VWEBP=OFF -DWEBP_BUILD_WEBPINFO=OFF -DWEBP_BUILD_WEBPMUX=OFF -DWEBP_BUILD_EXTRAS=OFF -DBUILD_SHARED_LIBS=ON -G Ninja || goto error
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DWEBP_BUILD_ANIM_UTILS=OFF -DWEBP_BUILD_CWEBP=OFF -DWEBP_BUILD_DWEBP=OFF -DWEBP_BUILD_GIF2WEBP=OFF -DWEBP_BUILD_IMG2WEBP=OFF -DWEBP_BUILD_VWEBP=OFF -DWEBP_BUILD_WEBPINFO=OFF -DWEBP_BUILD_WEBPMUX=OFF -DWEBP_BUILD_EXTRAS=OFF -DBUILD_SHARED_LIBS=ON -G Ninja || goto error
 cmake --build build --parallel || goto error
 ninja -C build install || goto error
 cd .. || goto error
@@ -207,7 +388,7 @@ echo Building SDL...
 rmdir /S /Q "%SDL%"
 %SEVENZIP% x "%SDL%.zip" || goto error
 cd "%SDL%" || goto error
-cmake -B build %ARM64TOOLCHAIN% -DCMAKE_BUILD_TYPE=Release %FORCEPDB% -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DBUILD_SHARED_LIBS=ON -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_VIDEO=OFF -DSDL_POWER=OFF -DSDL_SENSOR=OFF -DSDL_DIALOG=OFF -DSDL_TRAY=OFF -DSDL_TEST_LIBRARY=OFF -G Ninja || goto error
+cmake -B build -DCMAKE_BUILD_TYPE=Release %FORCEPDB% -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DBUILD_SHARED_LIBS=ON -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_VIDEO=OFF -DSDL_POWER=OFF -DSDL_SENSOR=OFF -DSDL_DIALOG=OFF -DSDL_TRAY=OFF -DSDL_TEST_LIBRARY=OFF -G Ninja || goto error
 cmake --build build --parallel || goto error
 ninja -C build install || goto error
 copy build\SDL3.pdb "%INSTALLDIR%\bin" || goto error
@@ -223,7 +404,7 @@ echo Building Qt base...
 rmdir /S /Q "qtbase-everywhere-src-%QT%"
 %SEVENZIP% x "qtbase-everywhere-src-%QT%.zip" || goto error
 cd "qtbase-everywhere-src-%QT%" || goto error
-cmake -B build %ARM64TOOLCHAIN% -DFEATURE_sql=OFF -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DQT_HOST_PATH="%X64INSTALLDIR%" %FORCEPDB% -DINPUT_gui=yes -DINPUT_widgets=yes -DINPUT_ssl=yes -DINPUT_openssl=no -DINPUT_schannel=yes -DFEATURE_system_png=ON -DFEATURE_system_jpeg=ON -DFEATURE_system_zlib=ON -DFEATURE_system_freetype=ON -DFEATURE_system_harfbuzz=ON -DQT_FEATURE_windows_ioring=OFF %QTBUILDSPEC% || goto error
+cmake -B build -DFEATURE_sql=OFF -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" %FORCEPDB% -DINPUT_gui=yes -DINPUT_widgets=yes -DINPUT_ssl=yes -DINPUT_openssl=no -DINPUT_schannel=yes -DFEATURE_system_png=ON -DFEATURE_system_jpeg=ON -DFEATURE_system_zlib=ON -DFEATURE_system_freetype=ON -DFEATURE_system_harfbuzz=ON -DQT_FEATURE_windows_ioring=OFF %QTBUILDSPEC% || goto error
 cmake --build build --parallel || goto error
 ninja -C build install || goto error
 cd .. || goto error
@@ -251,12 +432,12 @@ ninja install || goto error
 cd ..\.. || goto error
 
 echo Building Qt Tools...
-rmdir /S /Q "qtimageformats-everywhere-src-%QT%"
+rmdir /S /Q "qttools-everywhere-src-%QT%"
 %SEVENZIP% x "qttools-everywhere-src-%QT%.zip" || goto error
 cd "qttools-everywhere-src-%QT%" || goto error
 mkdir build || goto error
 cd build || goto error
-call "%INSTALLDIR%\bin\qt-configure-module.bat" .. -- %FORCEPDB% -DFEATURE_assistant=OFF -DFEATURE_clang=OFF -DFEATURE_designer=OFF -DFEATURE_kmap2qmap=OFF -DFEATURE_pixeltool=OFF -DFEATURE_pkg_config=OFF -DFEATURE_qev=OFF -DFEATURE_qtattributionsscanner=OFF -DFEATURE_qtdiag=OFF -DFEATURE_qtplugininfo=OFF || goto error
+call "%INSTALLDIR%\bin\qt-configure-module.bat" .. -- %FORCEPDB% -DFEATURE_assistant=OFF -DFEATURE_clang=OFF -DFEATURE_designer=ON -DFEATURE_kmap2qmap=OFF -DFEATURE_pixeltool=OFF -DFEATURE_pkg_config=OFF -DFEATURE_qev=OFF -DFEATURE_qtattributionsscanner=OFF -DFEATURE_qtdiag=OFF -DFEATURE_qtplugininfo=OFF || goto error
 cmake --build . --parallel || goto error
 ninja install || goto error
 cd ..\.. || goto error
@@ -283,7 +464,7 @@ rmdir /S /Q "QtApng-%QTAPNG%"
 %SEVENZIP% x "QtApng-%QTAPNG%.zip" || goto error
 cd "QtApng-%QTAPNG%" || goto error
 %PATCH% -p1 < "%SCRIPTDIR%\..\common\qtapng-cmake.patch" || goto error
-cmake -B build %ARM64TOOLCHAIN% -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" %FORCEPDB% %QTAPNGBUILDSPEC% || goto error
+cmake -B build -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" %FORCEPDB% %QTAPNGBUILDSPEC% || goto error
 cmake --build build --parallel || goto error
 ninja -C build install || goto error
 cd .. || goto error
@@ -292,8 +473,8 @@ if %DEBUG%==1 (
   set KDDOCKWIDGETSBUILDSPEC=-DCMAKE_CONFIGURATION_TYPES="Release;Debug" -DCMAKE_CROSS_CONFIGS=all -DCMAKE_DEFAULT_BUILD_TYPE=Release -DCMAKE_DEFAULT_CONFIGS=all -G "Ninja Multi-Config"
 ) else (
   rem kddockwidgets slightly changes the name of the dll depending on if CMAKE_BUILD_TYPE or CMAKE_CONFIGURATION_TYPES is used
-  rem The dll name being kddockwidgets-qt62.dll or kddockwidgets-qt62.dll respectively
-  rem Always use CMAKE_CONFIGURATION_TYPES to give consistant naming
+  rem The dll name being kddockwidgets-qt62.dll or kddockwidgets-qt6.dll respectively
+  rem Always use CMAKE_CONFIGURATION_TYPES to give consistent naming
   set KDDOCKWIDGETSBUILDSPEC=-DCMAKE_CONFIGURATION_TYPES=Release -DCMAKE_CROSS_CONFIGS=all -DCMAKE_DEFAULT_BUILD_TYPE=Release -DCMAKE_DEFAULT_CONFIGS=Release -G "Ninja Multi-Config"
 )
 
@@ -301,7 +482,7 @@ echo "Building KDDockWidgets..."
 rmdir /S /Q "KDDockWidgets-%KDDOCKWIDGETS%"
 %SEVENZIP% x "KDDockWidgets-%KDDOCKWIDGETS%.zip" || goto error
 cd "KDDockWidgets-%KDDOCKWIDGETS%" || goto error
-cmake -B build %ARM64TOOLCHAIN% -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DKDDockWidgets_QT6=true -DKDDockWidgets_EXAMPLES=false -DKDDockWidgets_FRONTENDS=qtwidgets %KDDOCKWIDGETSBUILDSPEC% || goto error
+cmake -B build -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DKDDockWidgets_QT6=true -DKDDockWidgets_EXAMPLES=false -DKDDockWidgets_FRONTENDS=qtwidgets %KDDOCKWIDGETSBUILDSPEC% || goto error
 cmake --build build --parallel || goto error
 ninja -C build install || goto error
 cd .. || goto error
@@ -310,7 +491,7 @@ echo "Building PlutoVG..."
 rmdir /S /Q "plutovg-%PLUTOVG%"
 %SEVENZIP% x "plutovg-%PLUTOVG%.zip" || goto error
 cd "plutovg-%PLUTOVG%" || goto error
-cmake %ARM64TOOLCHAIN% -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS_RELEASE="/Od /Ob0 /DNDEBUG" -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DBUILD_SHARED_LIBS=ON -DPLUTOVG_BUILD_EXAMPLES=OFF -B build -G Ninja || goto error
+cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS_RELEASE="/Od /Ob0 /DNDEBUG" -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DBUILD_SHARED_LIBS=ON -DPLUTOVG_BUILD_EXAMPLES=OFF -B build -G Ninja || goto error
 cmake --build build --parallel || goto error
 ninja -C build install || goto error
 cd .. || goto error
@@ -319,16 +500,16 @@ echo "Building PlutoSVG..."
 rmdir /S /Q "plutosvg-%PLUTOSVG%"
 %SEVENZIP% x "plutosvg-%PLUTOSVG%.zip" || goto error
 cd "plutosvg-%PLUTOSVG%" || goto error
-cmake %ARM64TOOLCHAIN% -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DBUILD_SHARED_LIBS=ON -DPLUTOSVG_ENABLE_FREETYPE=ON -DPLUTOSVG_BUILD_EXAMPLES=OFF -B build -G Ninja || goto error
+cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DBUILD_SHARED_LIBS=ON -DPLUTOSVG_ENABLE_FREETYPE=ON -DPLUTOSVG_BUILD_EXAMPLES=OFF -B build -G Ninja || goto error
 cmake --build build --parallel || goto error
 ninja -C build install || goto error
 cd .. || goto error
 
 echo "Building RapidYAML..."
 rmdir /S /Q "rapidyaml-%RAPIDYAML%-src"
-%SEVENZIP% x "rapidyaml-%RAPIDYAML%-src.zip" || goto error
+%SEVENZIP% x "-x^!rapidyaml-%RAPIDYAML%-src\ext\c4core\doc\img\*" "rapidyaml-%RAPIDYAML%-src.zip" || goto error
 cd "rapidyaml-%RAPIDYAML%-src" || goto error
-cmake %ARM64TOOLCHAIN% -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DBUILD_SHARED_LIBS=ON -B build -G Ninja || goto error
+cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DBUILD_SHARED_LIBS=ON -B build -G Ninja || goto error
 cmake --build build --parallel || goto error
 ninja -C build install || goto error
 cd .. || goto error
@@ -341,9 +522,9 @@ if not exist "%INSTALLDIR%\bin\D3D12" (
   mkdir "%INSTALLDIR%\bin\D3D12" || goto error
 )
 rem the pdbs aren't in the list of distributable files, so only copy the dlls.
-copy "build\native\bin\arm64\D3D12Core.dll" "%INSTALLDIR%\bin\D3D12\D3D12Core.dll" || goto error
+copy "build\native\bin\x64\D3D12Core.dll" "%INSTALLDIR%\bin\D3D12\D3D12Core.dll" || goto error
 if %DEBUG%==1 (
-  copy "build\native\bin\arm64\d3d12SDKLayers.dll" "%INSTALLDIR%\bin\D3D12\d3d12SDKLayers.dll" || goto error
+  copy "build\native\bin\x64\d3d12SDKLayers.dll" "%INSTALLDIR%\bin\D3D12\d3d12SDKLayers.dll" || goto error
 )
 cd .. || goto error
 
@@ -360,7 +541,7 @@ rename "SPIRV-Headers-%SHADERC_SPIRVHEADERS%" "spirv-headers" || goto error
 rename "SPIRV-Tools-%SHADERC_SPIRVTOOLS%" "spirv-tools" || goto error
 cd .. || goto error
 %PATCH% -p1 < "%SCRIPTDIR%\..\common\shaderc-changes.patch" || goto error
-cmake %ARM64TOOLCHAIN% -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DSHADERC_SKIP_TESTS=ON -DSHADERC_SKIP_EXAMPLES=ON -DSHADERC_SKIP_COPYRIGHT_CHECK=ON -DSHADERC_ENABLE_SHARED_CRT=ON -B build -G Ninja || goto error
+cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DSHADERC_SKIP_TESTS=ON -DSHADERC_SKIP_EXAMPLES=ON -DSHADERC_SKIP_COPYRIGHT_CHECK=ON -DSHADERC_ENABLE_SHARED_CRT=ON -B build -G Ninja || goto error
 cmake --build build --parallel || goto error
 ninja -C build install || goto error
 cd .. || goto error

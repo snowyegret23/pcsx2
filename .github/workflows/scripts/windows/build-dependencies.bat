@@ -24,16 +24,6 @@ if exist "%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" (
 )
 
 set SEVENZIP="C:\Program Files\7-Zip\7z.exe"
-if not exist %SEVENZIP% (
-  set SEVENZIP=
-  for /f "usebackq tokens=*" %%i in (`where 7z.exe 2^>NUL`) do (
-    if not defined SEVENZIP set SEVENZIP="%%i"
-  )
-  if not defined SEVENZIP (
-    echo 7-Zip not found.
-    goto error
-  )
-)
 set PATCH="C:\Program Files\Git\usr\bin\patch.exe"
 set BASH="C:\Program Files\Git\usr\bin\bash.exe"
 
@@ -228,19 +218,7 @@ if %BUILD_FFMPEG%==1 (
   echo "Installing nvenc headers..."
   rmdir /S /Q "nv-codec-headers-%NVENC%"
   tar xf "nv-codec-headers-%NVENC%.tar.gz" || goto error
-  where make /q
-  if !ERRORLEVEL!==0 (
-    make -C "nv-codec-headers-%NVENC%" PREFIX="%INSTALLDIR%" install || goto error
-  ) else (
-    set "INSTALLDIR_UNIX=%INSTALLDIR:\=/%"
-    mkdir "%INSTALLDIR%\include\ffnvcodec"
-    mkdir "%INSTALLDIR%\lib\pkgconfig"
-    xcopy "%BUILDDIR%\nv-codec-headers-%NVENC%\include\ffnvcodec\*.h" "%INSTALLDIR%\include\ffnvcodec\" /y || goto error
-    (for /f "usebackq delims=" %%i in ("nv-codec-headers-%NVENC%\ffnvcodec.pc.in") do (
-      set "line=%%i"
-      echo(!line:@@PREFIX@@=!INSTALLDIR_UNIX!!
-    )) > "%INSTALLDIR%\lib\pkgconfig\ffnvcodec.pc" || goto error
-  )
+  make -C "nv-codec-headers-%NVENC%" PREFIX="%INSTALLDIR%" install || goto error
   echo.
 
   set CC=cl
@@ -350,7 +328,7 @@ cd .. || goto error
 
 echo Building HarfBuzz...
 rmdir /S /Q "harfbuzz-%HARFBUZZ%"
-%SEVENZIP% x "-x^!harfbuzz-%HARFBUZZ%\README" "-x^!harfbuzz-%HARFBUZZ%\CLAUDE.md" "harfbuzz-%HARFBUZZ%.zip" || goto error
+%SEVENZIP% x "-x^!harfbuzz-%HARFBUZZ%\README" "harfbuzz-%HARFBUZZ%.zip" || goto error
 cd "harfbuzz-%HARFBUZZ%" || goto error
 cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DBUILD_SHARED_LIBS=ON -DHB_BUILD_UTILS=OFF -DHB_BUILD_GPU=OFF -B build -G Ninja || goto error
 cmake --build build --parallel || goto error
@@ -507,7 +485,7 @@ cd .. || goto error
 
 echo "Building RapidYAML..."
 rmdir /S /Q "rapidyaml-%RAPIDYAML%-src"
-%SEVENZIP% x "-x^!rapidyaml-%RAPIDYAML%-src\ext\c4core\doc\img\*" "rapidyaml-%RAPIDYAML%-src.zip" || goto error
+%SEVENZIP% x "rapidyaml-%RAPIDYAML%-src.zip" || goto error
 cd "rapidyaml-%RAPIDYAML%-src" || goto error
 cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%INSTALLDIR%" -DCMAKE_INSTALL_PREFIX="%INSTALLDIR%" -DBUILD_SHARED_LIBS=ON -B build -G Ninja || goto error
 cmake --build build --parallel || goto error

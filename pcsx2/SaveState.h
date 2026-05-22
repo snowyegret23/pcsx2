@@ -26,12 +26,7 @@ enum class FreezeAction
 // [SAVEVERSION+]
 // This informs the auto updater that the users savestates will be invalidated.
 
-#ifdef PCSX2_SAVE_VERSION_OVERRIDE
-static const u32 g_SaveVersion = PCSX2_SAVE_VERSION_OVERRIDE;
-#else
 static const u32 g_SaveVersion = (0x9A59 << 16) | 0x0000;
-#endif
-
 
 // the freezing data between submodules and core
 // an interesting thing to note is that this dates back from before plugin
