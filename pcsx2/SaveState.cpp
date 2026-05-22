@@ -48,6 +48,17 @@ using namespace R5900;
 
 static tlbs s_tlb_backup[std::size(tlb)];
 
+static const char* GetSaveStateVersionString()
+{
+	if (BuildVersion::GitTaggedCommit && BuildVersion::GitTag[0] != '\0')
+		return BuildVersion::GitTag;
+
+	if (BuildVersion::GitRev[0] != '\0')
+		return BuildVersion::GitRev;
+
+	return "Unknown";
+}
+
 static void PreLoadPrep()
 {
 	// ensure everything is in sync before we start overwriting stuff.
@@ -982,14 +993,7 @@ static bool SaveState_AddToZip(zip_t* zf, ArchiveEntryList* srclist, SaveStateSc
 
 		VersionIndicator* vi = static_cast<VersionIndicator*>(std::malloc(sizeof(VersionIndicator)));
 		vi->save_version = g_SaveVersion;
-		if (BuildVersion::GitTaggedCommit)
-		{
-			StringUtil::Strlcpy(vi->version, BuildVersion::GitTag, std::size(vi->version));
-		}
-		else
-		{
-			StringUtil::Strlcpy(vi->version, "Unknown", std::size(vi->version));
-		}
+		StringUtil::Strlcpy(vi->version, GetSaveStateVersionString(), std::size(vi->version));
 
 		zip_source_t* const zs = zip_source_buffer(zf, vi, sizeof(*vi), 1);
 		if (!zs)
@@ -1114,11 +1118,7 @@ static bool CheckVersion(const std::string& filename, zip_t* zf, Error* error)
 	// than the emulator recognizes.  99% chance that trying to load it will just corrupt emulation or crash.
 	if (savever > g_SaveVersion || (savever >> 16) != (g_SaveVersion >> 16))
 	{
-		std::string current_emulator_version = BuildVersion::GitTag;
-		if (current_emulator_version.empty())
-		{
-			current_emulator_version = "Unknown";
-		}
+		const char* current_emulator_version = GetSaveStateVersionString();
 		Error::SetString(error, fmt::format(TRANSLATE_FS("SaveState","This save state was created with PCSX2 version {0}. It is no longer compatible "
 											"with your current PCSX2 version {1}.\n\n"
 											"If you have any unsaved progress on this save state, you can download the compatible PCSX2 version {0} "

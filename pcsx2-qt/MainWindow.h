@@ -237,6 +237,8 @@ private:
 	void recreate();
 	void recreateSettings();
 	void destroySubWindows();
+	void restoreToolWindowsFromConfig();
+	void saveToolWindowStateToConfig();
 
 	void registerForDeviceNotifications();
 	void unregisterForDeviceNotifications();

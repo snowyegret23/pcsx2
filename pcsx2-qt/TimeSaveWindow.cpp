@@ -11,11 +11,13 @@
 
 #include "common/Path.h"
 
+#include <QtCore/QByteArray>
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QTimer>
+#include <QtGui/QCloseEvent>
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QFileDialog>
 #include <QtWidgets/QGridLayout>
@@ -28,7 +30,10 @@
 #include <QtWidgets/QTreeWidget>
 #include <QtWidgets/QVBoxLayout>
 
+#include <algorithm>
 #include <utility>
+
+static constexpr const char* TIME_SAVE_SETTINGS_SECTION = "TimeSaves/UserInterface";
 
 TimeSaveWindow::TimeSaveWindow(QWidget* parent, QString serial)
 	: QDialog(parent)
@@ -40,12 +45,13 @@ TimeSaveWindow::TimeSaveWindow(QWidget* parent, QString serial)
 	m_auto_save = new QCheckBox(tr("Auto Save"), this);
 	m_interval = new QSpinBox(this);
 	m_interval->setRange(1, 3600);
-	m_interval->setValue(10);
+	m_interval->setValue(std::clamp(Host::GetBaseIntSettingValue(TIME_SAVE_SETTINGS_SECTION, "IntervalSeconds", 10), 1, 3600));
 	m_interval->setSuffix(tr(" sec"));
 
 	m_keep_count = new QSpinBox(this);
 	m_keep_count->setRange(1, 1000);
-	m_keep_count->setValue(60);
+	m_keep_count->setValue(std::clamp(Host::GetBaseIntSettingValue(TIME_SAVE_SETTINGS_SECTION, "KeepCount", 60), 1, 1000));
+	m_auto_save->setChecked(Host::GetBaseBoolSettingValue(TIME_SAVE_SETTINGS_SECTION, "AutoSave", false));
 
 	m_save_now_button = new QPushButton(tr("Save Now"), this);
 	m_load_button = new QPushButton(tr("Load"), this);
@@ -97,13 +103,31 @@ TimeSaveWindow::TimeSaveWindow(QWidget* parent, QString serial)
 	connect(m_delete_button, &QPushButton::clicked, this, &TimeSaveWindow::deleteSelected);
 	connect(m_refresh_button, &QPushButton::clicked, this, &TimeSaveWindow::refreshList);
 	connect(m_timer, &QTimer::timeout, this, &TimeSaveWindow::captureNow);
+	connect(m_keep_count, &QSpinBox::valueChanged, this, [](int value) {
+		Host::SetBaseIntSettingValue(TIME_SAVE_SETTINGS_SECTION, "KeepCount", value);
+		Host::CommitBaseSettingChanges();
+	});
 	connect(m_save_list, &QTreeWidget::itemSelectionChanged, this, &TimeSaveWindow::updateButtons);
 	connect(m_save_list, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem*, int) { loadSelected(); });
 
 	refreshList();
+	if (m_auto_save->isChecked())
+		m_timer->start();
+	restoreWindowGeometry();
 }
 
 TimeSaveWindow::~TimeSaveWindow() = default;
+
+bool TimeSaveWindow::shouldShowOnStartup()
+{
+	return Host::GetBaseBoolSettingValue(TIME_SAVE_SETTINGS_SECTION, "ShowOnStartup", false);
+}
+
+void TimeSaveWindow::setShowOnStartup(bool enabled)
+{
+	Host::SetBaseBoolSettingValue(TIME_SAVE_SETTINGS_SECTION, "ShowOnStartup", enabled);
+	Host::CommitBaseSettingChanges();
+}
 
 void TimeSaveWindow::setGame(QString serial)
 {
@@ -114,8 +138,35 @@ void TimeSaveWindow::setGame(QString serial)
 	refreshList();
 }
 
+void TimeSaveWindow::saveWindowGeometry()
+{
+	const std::string old_geometry = Host::GetBaseStringSettingValue(TIME_SAVE_SETTINGS_SECTION, "WindowGeometry");
+	const std::string geometry = saveGeometry().toBase64().toStdString();
+	if (geometry != old_geometry)
+	{
+		Host::SetBaseStringSettingValue(TIME_SAVE_SETTINGS_SECTION, "WindowGeometry", geometry.c_str());
+		Host::CommitBaseSettingChanges();
+	}
+}
+
+void TimeSaveWindow::closeEvent(QCloseEvent* event)
+{
+	saveWindowGeometry();
+	QDialog::closeEvent(event);
+}
+
+void TimeSaveWindow::restoreWindowGeometry()
+{
+	const std::string geometry = Host::GetBaseStringSettingValue(TIME_SAVE_SETTINGS_SECTION, "WindowGeometry");
+	if (!geometry.empty())
+		restoreGeometry(QByteArray::fromBase64(QByteArray::fromStdString(geometry)));
+}
+
 void TimeSaveWindow::onAutoSaveToggled(bool enabled)
 {
+	Host::SetBaseBoolSettingValue(TIME_SAVE_SETTINGS_SECTION, "AutoSave", enabled);
+	Host::CommitBaseSettingChanges();
+
 	if (enabled)
 		m_timer->start();
 	else
@@ -124,6 +175,8 @@ void TimeSaveWindow::onAutoSaveToggled(bool enabled)
 
 void TimeSaveWindow::onIntervalChanged(int value)
 {
+	Host::SetBaseIntSettingValue(TIME_SAVE_SETTINGS_SECTION, "IntervalSeconds", value);
+	Host::CommitBaseSettingChanges();
 	m_timer->setInterval(value * 1000);
 }
 

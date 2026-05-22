@@ -150,6 +150,7 @@ void MainWindow::initialize()
 	switchToGameListView();
 	updateWindowTitle();
 	updateGameDependentActions();
+	restoreToolWindowsFromConfig();
 
 #ifdef _WIN32
 	registerForDeviceNotifications();
@@ -620,6 +621,7 @@ void MainWindow::quit()
 
 void MainWindow::destroySubWindows()
 {
+	saveToolWindowStateToConfig();
 	DebuggerWindow::destroyInstance();
 
 	if (m_controller_settings_window)
@@ -653,6 +655,44 @@ void MainWindow::destroySubWindows()
 	SettingsWindow::closeGamePropertiesDialogs();
 
 	LogWindow::destroy();
+}
+
+void MainWindow::restoreToolWindowsFromConfig()
+{
+	if (CheatTrainerWindow::shouldShowOnStartup())
+	{
+		if (!m_cheat_trainer_window)
+			m_cheat_trainer_window = new CheatTrainerWindow(this, s_current_disc_serial, s_current_running_crc);
+		else
+			m_cheat_trainer_window->setGame(s_current_disc_serial, s_current_running_crc);
+
+		m_cheat_trainer_window->show();
+	}
+
+	if (TimeSaveWindow::shouldShowOnStartup())
+	{
+		if (!m_time_save_window)
+			m_time_save_window = new TimeSaveWindow(this, s_current_disc_serial);
+		else
+			m_time_save_window->setGame(s_current_disc_serial);
+
+		m_time_save_window->show();
+	}
+}
+
+void MainWindow::saveToolWindowStateToConfig()
+{
+	if (m_cheat_trainer_window)
+	{
+		CheatTrainerWindow::setShowOnStartup(m_cheat_trainer_window->isVisible());
+		m_cheat_trainer_window->saveWindowGeometry();
+	}
+
+	if (m_time_save_window)
+	{
+		TimeSaveWindow::setShowOnStartup(m_time_save_window->isVisible());
+		m_time_save_window->saveWindowGeometry();
+	}
 }
 
 void MainWindow::onScreenshotActionTriggered()
