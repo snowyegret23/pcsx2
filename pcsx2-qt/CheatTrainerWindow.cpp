@@ -7,6 +7,8 @@
 #include "pcsx2/Patch.h"
 #include "pcsx2/VMManager.h"
 
+#include <QtCore/QByteArray>
+#include <QtGui/QCloseEvent>
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QHeaderView>
@@ -17,6 +19,8 @@
 
 #include <algorithm>
 #include <utility>
+
+static constexpr const char* CHEAT_TRAINER_SETTINGS_SECTION = "CheatTrainer/UserInterface";
 
 CheatTrainerWindow::CheatTrainerWindow(QWidget* parent, QString serial, quint32 crc)
 	: QDialog(parent)
@@ -63,9 +67,21 @@ CheatTrainerWindow::CheatTrainerWindow(QWidget* parent, QString serial, quint32 
 	connect(m_cheat_list, &QTreeWidget::itemChanged, this, &CheatTrainerWindow::onItemChanged);
 
 	reloadList();
+	restoreWindowGeometry();
 }
 
 CheatTrainerWindow::~CheatTrainerWindow() = default;
+
+bool CheatTrainerWindow::shouldShowOnStartup()
+{
+	return Host::GetBaseBoolSettingValue(CHEAT_TRAINER_SETTINGS_SECTION, "ShowOnStartup", false);
+}
+
+void CheatTrainerWindow::setShowOnStartup(bool enabled)
+{
+	Host::SetBaseBoolSettingValue(CHEAT_TRAINER_SETTINGS_SECTION, "ShowOnStartup", enabled);
+	Host::CommitBaseSettingChanges();
+}
 
 void CheatTrainerWindow::setGame(QString serial, quint32 crc)
 {
@@ -75,6 +91,30 @@ void CheatTrainerWindow::setGame(QString serial, quint32 crc)
 	m_serial = std::move(serial);
 	m_crc = crc;
 	reloadList();
+}
+
+void CheatTrainerWindow::saveWindowGeometry()
+{
+	const std::string old_geometry = Host::GetBaseStringSettingValue(CHEAT_TRAINER_SETTINGS_SECTION, "WindowGeometry");
+	const std::string geometry = saveGeometry().toBase64().toStdString();
+	if (geometry != old_geometry)
+	{
+		Host::SetBaseStringSettingValue(CHEAT_TRAINER_SETTINGS_SECTION, "WindowGeometry", geometry.c_str());
+		Host::CommitBaseSettingChanges();
+	}
+}
+
+void CheatTrainerWindow::closeEvent(QCloseEvent* event)
+{
+	saveWindowGeometry();
+	QDialog::closeEvent(event);
+}
+
+void CheatTrainerWindow::restoreWindowGeometry()
+{
+	const std::string geometry = Host::GetBaseStringSettingValue(CHEAT_TRAINER_SETTINGS_SECTION, "WindowGeometry");
+	if (!geometry.empty())
+		restoreGeometry(QByteArray::fromBase64(QByteArray::fromStdString(geometry)));
 }
 
 void CheatTrainerWindow::reloadList()

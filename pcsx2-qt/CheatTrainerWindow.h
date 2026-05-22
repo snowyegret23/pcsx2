@@ -9,6 +9,7 @@
 #include <vector>
 
 class QCheckBox;
+class QCloseEvent;
 class QPushButton;
 class QTreeWidget;
 class QTreeWidgetItem;
@@ -21,7 +22,14 @@ public:
 	CheatTrainerWindow(QWidget* parent, QString serial, quint32 crc);
 	~CheatTrainerWindow() override;
 
+	static bool shouldShowOnStartup();
+	static void setShowOnStartup(bool enabled);
+
 	void setGame(QString serial, quint32 crc);
+	void saveWindowGeometry();
+
+protected:
+	void closeEvent(QCloseEvent* event) override;
 
 private Q_SLOTS:
 	void reloadList();
@@ -31,6 +39,7 @@ private Q_SLOTS:
 	void disableAll();
 
 private:
+	void restoreWindowGeometry();
 	void setAllCheats(bool enabled);
 	void setCheatEnabled(const QString& name, bool enabled);
 

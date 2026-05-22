@@ -7,6 +7,7 @@
 #include <QtWidgets/QDialog>
 
 class QCheckBox;
+class QCloseEvent;
 class QPushButton;
 class QSpinBox;
 class QTimer;
@@ -21,7 +22,14 @@ public:
 	TimeSaveWindow(QWidget* parent, QString serial);
 	~TimeSaveWindow() override;
 
+	static bool shouldShowOnStartup();
+	static void setShowOnStartup(bool enabled);
+
 	void setGame(QString serial);
+	void saveWindowGeometry();
+
+protected:
+	void closeEvent(QCloseEvent* event) override;
 
 private Q_SLOTS:
 	void onAutoSaveToggled(bool enabled);
@@ -33,6 +41,7 @@ private Q_SLOTS:
 	void refreshList();
 
 private:
+	void restoreWindowGeometry();
 	QString getSaveDirectory() const;
 	QString getSelectedPath() const;
 	QString makeDisplayName(const QString& file_name) const;
