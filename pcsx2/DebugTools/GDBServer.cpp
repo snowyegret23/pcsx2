@@ -4,13 +4,16 @@
 #include "GDBServer.h"
 
 #include "Breakpoints.h"
+#include "Config.h"
 #include "Host.h"
 #include "MIPSAnalyst.h"
+#include "MTGS.h"
 #include "Patch.h"
 #include "VMManager.h"
 
 #include "common/Console.h"
 #include "common/Error.h"
+#include "common/Image.h"
 #include "common/StringUtil.h"
 #include "common/Threading.h"
 
@@ -344,6 +347,86 @@ static bool parse_slot(std::string_view text, s32* slot)
 		return false;
 	*slot = static_cast<s32>(out);
 	return true;
+}
+
+static std::vector<std::string> split_args(std::string_view text)
+{
+	std::vector<std::string> out;
+	text = trim(text);
+	while (!text.empty())
+	{
+		const auto [head, tail] = split_command(text);
+		if (!head.empty())
+			out.push_back(head);
+		text = trim(tail);
+	}
+	return out;
+}
+
+static bool parse_u32_arg(std::string_view text, u32* value)
+{
+	if (starts_with(text, "0x") || starts_with(text, "0X"))
+		text.remove_prefix(2);
+	return parse_hex_u32(text, value);
+}
+
+static bool parse_int_arg(std::string_view text, int* value)
+{
+	if (text.empty())
+		return false;
+
+	int out = 0;
+	const auto result = std::from_chars(text.data(), text.data() + text.size(), out, 10);
+	if (result.ec != std::errc())
+		return false;
+
+	*value = out;
+	return true;
+}
+
+static bool parse_u128_arg(std::string_view text, u128* value)
+{
+	if (starts_with(text, "0x") || starts_with(text, "0X"))
+		text.remove_prefix(2);
+	if (text.empty() || text.size() > 32)
+		return false;
+
+	u128 out = {};
+	for (char ch : text)
+	{
+		const std::optional<u8> nibble = from_hex(ch);
+		if (!nibble.has_value())
+			return false;
+
+		u64 carry = *nibble;
+		for (u32& part : out._u32)
+		{
+			const u64 next = (static_cast<u64>(part) << 4) | carry;
+			part = static_cast<u32>(next);
+			carry = next >> 32;
+		}
+		if (carry != 0)
+			return false;
+	}
+
+	*value = out;
+	return true;
+}
+
+static std::string format_hex128(u128 value)
+{
+	return fmt::format("{:08x}{:08x}{:08x}{:08x}", value._u32[3], value._u32[2], value._u32[1], value._u32[0]);
+}
+
+static std::string clean_field(std::string_view text)
+{
+	std::string out(text);
+	for (char& ch : out)
+	{
+		if (ch == '\t' || ch == '\r' || ch == '\n')
+			ch = ' ';
+	}
+	return out;
 }
 
 GDBServer::GDBServer(DebugInterface* debugInterface)
@@ -1169,6 +1252,408 @@ std::string GDBServer::runPcsx2Command(std::string_view command_view)
 	if (verb == "status")
 		return getStatusString();
 
+	if (verb == "debug_registers")
+	{
+		if (!m_debugInterface || !m_debugInterface->isAlive())
+			return "ERR no debug target";
+
+		int category = -1;
+		if (!argument.empty() && !parse_int_arg(argument, &category))
+			return "ERR invalid category";
+
+		const int category_count = m_debugInterface->getRegisterCategoryCount();
+		if (category >= category_count)
+			return "ERR invalid category";
+
+		std::ostringstream ss;
+		ss << "OK pc=0x" << fmt::format("{:08x}", m_debugInterface->getPC());
+		ss << " cycles=" << m_debugInterface->getCycles();
+		ss << '\n' << "HI\t" << format_hex128(m_debugInterface->getHI());
+		ss << '\n' << "LO\t" << format_hex128(m_debugInterface->getLO());
+
+		const int start = category >= 0 ? category : 0;
+		const int end = category >= 0 ? category + 1 : category_count;
+		for (int cat = start; cat < end; cat++)
+		{
+			const int size = m_debugInterface->getRegisterSize(cat);
+			const int count = m_debugInterface->getRegisterCount(cat);
+			const char* cat_name = m_debugInterface->getRegisterCategoryName(cat);
+			for (int index = 0; index < count; index++)
+			{
+				ss << '\n' << "REG\t" << cat << '\t' << clean_field(cat_name) << '\t' << size << '\t'
+				   << index << '\t' << clean_field(m_debugInterface->getRegisterName(cat, index)) << '\t'
+				   << format_hex128(m_debugInterface->getRegister(cat, index)) << '\t'
+				   << clean_field(m_debugInterface->getRegisterString(cat, index));
+			}
+		}
+		return ss.str();
+	}
+
+	if (verb == "debug_write_register")
+	{
+		if (!m_debugInterface || !m_debugInterface->isAlive())
+			return "ERR no debug target";
+
+		const std::vector<std::string> args = split_args(argument);
+		if (args.size() < 3)
+			return "ERR usage debug_write_register <category> <index> <hex_value>";
+
+		int category = 0;
+		int index = 0;
+		u128 value = {};
+		if (!parse_int_arg(args[0], &category) || !parse_int_arg(args[1], &index) || !parse_u128_arg(args[2], &value))
+			return "ERR invalid register argument";
+		if (category < 0 || category >= m_debugInterface->getRegisterCategoryCount() ||
+			index < 0 || index >= m_debugInterface->getRegisterCount(category))
+		{
+			return "ERR invalid register";
+		}
+
+		m_debugInterface->setRegister(category, index, value);
+		return fmt::format("OK category={} index={} value={}", category, index, format_hex128(value));
+	}
+
+	if (verb == "debug_set_pc")
+	{
+		if (!m_debugInterface || !m_debugInterface->isAlive())
+			return "ERR no debug target";
+
+		u32 pc = 0;
+		if (!parse_u32_arg(argument, &pc))
+			return "ERR invalid pc";
+		m_debugInterface->setPc(pc);
+		return fmt::format("OK pc=0x{:08x}", pc);
+	}
+
+	if (verb == "debug_disasm")
+	{
+		if (!m_debugInterface || !m_debugInterface->isAlive())
+			return "ERR no debug target";
+
+		const std::vector<std::string> args = split_args(argument);
+		if (args.empty())
+			return "ERR usage debug_disasm <address> [count]";
+
+		u32 address = 0;
+		int count = 20;
+		if (!parse_u32_arg(args[0], &address))
+			return "ERR invalid address";
+		if (args.size() >= 2 && !parse_int_arg(args[1], &count))
+			return "ERR invalid count";
+		count = std::clamp(count, 1, 500);
+
+		std::ostringstream ss;
+		ss << "OK count=" << count;
+		for (int i = 0; i < count; i++)
+		{
+			const u32 pc = address + static_cast<u32>(i * 4);
+			if (!m_debugInterface->isValidAddress(pc))
+				break;
+			bool valid = true;
+			const u32 opcode = m_debugInterface->Read32(pc, &valid);
+			if (!valid)
+				break;
+			ss << '\n' << fmt::format("0x{:08x}\t0x{:08x}\t{}", pc, opcode, clean_field(m_debugInterface->disasm(pc, true)));
+		}
+		return ss.str();
+	}
+
+	if (verb == "debug_eval")
+	{
+		if (!m_debugInterface || !m_debugInterface->isAlive())
+			return "ERR no debug target";
+		if (argument.empty())
+			return "ERR missing expression";
+
+		u64 result = 0;
+		std::string error;
+		if (!m_debugInterface->evaluateExpression(argument.data(), result, error))
+			return fmt::format("ERR {}", error);
+
+		return fmt::format("OK hex=0x{:x} value={}", result, result);
+	}
+
+	if (verb == "debug_set_breakpoint")
+	{
+		if (!m_debugInterface || !m_debugInterface->isAlive())
+			return "ERR no debug target";
+
+		const std::vector<std::string> args = split_args(argument);
+		if (args.empty())
+			return "ERR usage debug_set_breakpoint <address> [temporary] [enabled] [hex_condition] [hex_description]";
+
+		u32 address = 0;
+		if (!parse_u32_arg(args[0], &address))
+			return "ERR invalid address";
+
+		const bool temporary = args.size() >= 2 && args[1] != "0" && args[1] != "false";
+		const bool enabled = args.size() < 3 || (args[2] != "0" && args[2] != "false");
+		const BreakPointCpu cpu = m_debugInterface->getCpuType();
+
+		std::string condition;
+		if (args.size() >= 4)
+		{
+			const std::optional<std::string> decoded = decode_hex_string(args[3]);
+			if (!decoded.has_value())
+				return "ERR invalid condition encoding";
+			condition = *decoded;
+		}
+
+		std::string description;
+		if (args.size() >= 5)
+		{
+			const std::optional<std::string> decoded = decode_hex_string(args[4]);
+			if (!decoded.has_value())
+				return "ERR invalid description encoding";
+			description = *decoded;
+		}
+
+		std::lock_guard lock(s_cpu_transaction_mutex);
+		CBreakPoints::AddBreakPoint(cpu, address, temporary, enabled);
+		if (!description.empty())
+			CBreakPoints::ChangeBreakPointDescription(cpu, address, description);
+		if (!condition.empty())
+		{
+			BreakPointCond cond;
+			cond.debug = m_debugInterface;
+			cond.expressionString = condition;
+			std::string error;
+			if (!m_debugInterface->initExpression(condition.c_str(), cond.expression, error))
+				return fmt::format("ERR {}", error);
+			CBreakPoints::ChangeBreakPointAddCond(cpu, address, cond);
+		}
+		return fmt::format("OK address=0x{:08x}", address);
+	}
+
+	if (verb == "debug_remove_breakpoint")
+	{
+		if (!m_debugInterface || !m_debugInterface->isAlive())
+			return "ERR no debug target";
+
+		u32 address = 0;
+		if (!parse_u32_arg(argument, &address))
+			return "ERR invalid address";
+
+		std::lock_guard lock(s_cpu_transaction_mutex);
+		CBreakPoints::RemoveBreakPoint(m_debugInterface->getCpuType(), address);
+		return fmt::format("OK address=0x{:08x}", address);
+	}
+
+	if (verb == "debug_list_breakpoints")
+	{
+		if (!m_debugInterface || !m_debugInterface->isAlive())
+			return "ERR no debug target";
+
+		const std::vector<BreakPoint> breakpoints = CBreakPoints::GetBreakpoints(m_debugInterface->getCpuType(), true);
+		std::ostringstream ss;
+		ss << "OK count=" << breakpoints.size();
+		for (const BreakPoint& bp : breakpoints)
+		{
+			ss << '\n' << fmt::format("0x{:08x}", bp.addr) << '\t' << (bp.enabled ? 1 : 0) << '\t'
+			   << (bp.temporary ? 1 : 0) << '\t' << (bp.stepping ? 1 : 0) << '\t' << (bp.hasCond ? 1 : 0)
+			   << '\t' << clean_field(bp.hasCond ? bp.cond.expressionString : std::string())
+			   << '\t' << clean_field(bp.description);
+		}
+		return ss.str();
+	}
+
+	if (verb == "debug_set_watchpoint")
+	{
+		if (!m_debugInterface || !m_debugInterface->isAlive())
+			return "ERR no debug target";
+
+		const std::vector<std::string> args = split_args(argument);
+		if (args.size() < 2)
+			return "ERR usage debug_set_watchpoint <start> <end> [read|write|readwrite|onchange] [break|log|both] [hex_condition] [hex_description]";
+
+		u32 start = 0;
+		u32 end = 0;
+		if (!parse_u32_arg(args[0], &start) || !parse_u32_arg(args[1], &end))
+			return "ERR invalid range";
+		if (end <= start)
+			return "ERR invalid range";
+
+		MemCheckCondition cond = MEMCHECK_WRITE;
+		if (args.size() >= 3)
+		{
+			if (args[2] == "read")
+				cond = MEMCHECK_READ;
+			else if (args[2] == "readwrite" || args[2] == "access")
+				cond = MEMCHECK_READWRITE;
+			else if (args[2] == "onchange")
+				cond = static_cast<MemCheckCondition>(MEMCHECK_WRITE | MEMCHECK_WRITE_ONCHANGE);
+			else if (args[2] != "write")
+				return "ERR invalid watchpoint type";
+		}
+
+		MemCheckResult result = MEMCHECK_BREAK;
+		if (args.size() >= 4)
+		{
+			if (args[3] == "log")
+				result = MEMCHECK_LOG;
+			else if (args[3] == "both")
+				result = MEMCHECK_BOTH;
+			else if (args[3] != "break")
+				return "ERR invalid watchpoint action";
+		}
+
+		std::string condition;
+		if (args.size() >= 5)
+		{
+			const std::optional<std::string> decoded = decode_hex_string(args[4]);
+			if (!decoded.has_value())
+				return "ERR invalid condition encoding";
+			condition = *decoded;
+		}
+
+		std::string description;
+		if (args.size() >= 6)
+		{
+			const std::optional<std::string> decoded = decode_hex_string(args[5]);
+			if (!decoded.has_value())
+				return "ERR invalid description encoding";
+			description = *decoded;
+		}
+
+		std::lock_guard lock(s_cpu_transaction_mutex);
+		const BreakPointCpu cpu = m_debugInterface->getCpuType();
+		CBreakPoints::AddMemCheck(cpu, start, end, cond, result);
+		if (!description.empty())
+			CBreakPoints::ChangeMemCheckDescription(cpu, start, end, description);
+		if (!condition.empty())
+		{
+			BreakPointCond bp_cond;
+			bp_cond.debug = m_debugInterface;
+			bp_cond.expressionString = condition;
+			std::string error;
+			if (!m_debugInterface->initExpression(condition.c_str(), bp_cond.expression, error))
+				return fmt::format("ERR {}", error);
+			CBreakPoints::ChangeMemCheckAddCond(cpu, start, end, bp_cond);
+		}
+		return fmt::format("OK start=0x{:08x} end=0x{:08x}", start, end);
+	}
+
+	if (verb == "debug_remove_watchpoint")
+	{
+		if (!m_debugInterface || !m_debugInterface->isAlive())
+			return "ERR no debug target";
+
+		const std::vector<std::string> args = split_args(argument);
+		if (args.size() < 2)
+			return "ERR usage debug_remove_watchpoint <start> <end>";
+
+		u32 start = 0;
+		u32 end = 0;
+		if (!parse_u32_arg(args[0], &start) || !parse_u32_arg(args[1], &end))
+			return "ERR invalid range";
+
+		std::lock_guard lock(s_cpu_transaction_mutex);
+		CBreakPoints::RemoveMemCheck(m_debugInterface->getCpuType(), start, end);
+		return fmt::format("OK start=0x{:08x} end=0x{:08x}", start, end);
+	}
+
+	if (verb == "debug_list_watchpoints")
+	{
+		if (!m_debugInterface || !m_debugInterface->isAlive())
+			return "ERR no debug target";
+
+		const std::vector<MemCheck> checks = CBreakPoints::GetMemChecks(m_debugInterface->getCpuType());
+		std::ostringstream ss;
+		ss << "OK count=" << checks.size();
+		for (const MemCheck& check : checks)
+		{
+			ss << '\n' << fmt::format("0x{:08x}\t0x{:08x}", check.start, check.end)
+			   << '\t' << static_cast<int>(check.memCond)
+			   << '\t' << static_cast<int>(check.result)
+			   << '\t' << (check.hasCond ? 1 : 0)
+			   << '\t' << clean_field(check.hasCond ? check.cond.expressionString : std::string())
+			   << '\t' << clean_field(check.description)
+			   << '\t' << check.numHits
+			   << '\t' << fmt::format("0x{:08x}", check.lastPC)
+			   << '\t' << fmt::format("0x{:08x}", check.lastAddr)
+			   << '\t' << check.lastSize;
+		}
+		return ss.str();
+	}
+
+	if (verb == "debug_clear_breakpoints")
+	{
+		std::lock_guard lock(s_cpu_transaction_mutex);
+		CBreakPoints::ClearAllBreakPoints();
+		CBreakPoints::ClearAllMemChecks();
+		return "OK";
+	}
+
+	if (verb == "debug_threads")
+	{
+		if (!m_debugInterface || !m_debugInterface->isAlive())
+			return "ERR no debug target";
+
+		const std::vector<std::unique_ptr<BiosThread>> threads = m_debugInterface->GetThreadList();
+		std::ostringstream ss;
+		ss << "OK count=" << threads.size();
+		for (const std::unique_ptr<BiosThread>& thread : threads)
+		{
+			ss << '\n' << thread->TID()
+			   << '\t' << fmt::format("0x{:08x}", thread->PC())
+			   << '\t' << static_cast<int>(thread->Status())
+			   << '\t' << static_cast<int>(thread->Wait())
+			   << '\t' << thread->WaitId()
+			   << '\t' << fmt::format("0x{:08x}", thread->EntryPoint())
+			   << '\t' << thread->Priority();
+		}
+		return ss.str();
+	}
+
+	if (verb == "debug_modules")
+	{
+		if (!m_debugInterface || !m_debugInterface->isAlive())
+			return "ERR no debug target";
+
+		const std::vector<IopMod> modules = m_debugInterface->GetModuleList();
+		std::ostringstream ss;
+		ss << "OK count=" << modules.size();
+		for (const IopMod& module : modules)
+			ss << '\n' << clean_field(module.name) << '\t' << module.version;
+		return ss.str();
+	}
+
+	if (verb == "debug_backtrace")
+	{
+		if (!m_debugInterface || !m_debugInterface->isAlive())
+			return "ERR no debug target";
+
+		const std::vector<std::unique_ptr<BiosThread>> threads = m_debugInterface->GetThreadList();
+		if (threads.empty())
+			return "ERR no threads";
+
+		const BiosThread* selected = threads.front().get();
+		for (const std::unique_ptr<BiosThread>& thread : threads)
+		{
+			if (thread->Status() == ThreadStatus::THS_RUN)
+			{
+				selected = thread.get();
+				break;
+			}
+		}
+
+		int max_frames = 32;
+		if (!argument.empty() && !parse_int_arg(argument, &max_frames))
+			return "ERR invalid max_frames";
+		max_frames = std::clamp(max_frames, 1, 128);
+
+		const std::vector<MipsStackWalk::StackFrame> frames = m_debugInterface->StackTrace(*selected);
+		std::ostringstream ss;
+		ss << "OK count=" << std::min<int>(static_cast<int>(frames.size()), max_frames);
+		for (int i = 0; i < static_cast<int>(frames.size()) && i < max_frames; i++)
+		{
+			const MipsStackWalk::StackFrame& frame = frames[i];
+			ss << '\n' << fmt::format("0x{:08x}\t0x{:08x}\t0x{:08x}\t{}", frame.entry, frame.pc, frame.sp, frame.stackSize)
+			   << '\t' << clean_field(m_debugInterface->disasm(frame.pc, true));
+		}
+		return ss.str();
+	}
+
 	if (verb == "pause")
 	{
 		Host::RunOnCPUThread([]() { VMManager::SetPaused(true); }, true);
@@ -1326,6 +1811,52 @@ std::string GDBServer::runPcsx2Command(std::string_view command_view)
 	{
 		Host::RunOnCPUThread([]() { VMManager::WaitForSaveStateFlush(); }, true);
 		return "OK wait_savestate_flush";
+	}
+
+	if (verb == "screenshot_file")
+	{
+		if (argument.empty())
+			return "ERR usage screenshot_file <hex_utf8_path>";
+
+		const std::optional<std::string> decoded = decode_hex_string(argument);
+		if (!decoded.has_value() || decoded->empty())
+			return "ERR invalid path encoding";
+		if (decoded->find_first_of("\t\r\n") != std::string::npos)
+			return "ERR invalid path";
+
+		bool ok = false;
+		u32 width = 0;
+		u32 height = 0;
+		std::string error;
+		Host::RunOnCPUThread([path = *decoded, &ok, &width, &height, &error]() {
+			if (!VMManager::HasValidVM())
+			{
+				error = "no valid vm";
+				return;
+			}
+
+			std::vector<u32> pixels;
+			if (!MTGS::SaveMemorySnapshot(0, 0, true, true, &width, &height, &pixels))
+			{
+				error = "failed to capture current frame";
+				return;
+			}
+
+			const RGBA8Image image(width, height, std::move(pixels));
+			const u8 quality = static_cast<u8>(std::clamp(EmuConfig.GS.ScreenshotQuality, 1, 100));
+			if (!image.SaveToFile(path.c_str(), quality))
+			{
+				error = "failed to save screenshot";
+				return;
+			}
+
+			ok = true;
+		}, true);
+
+		if (!ok)
+			return fmt::format("ERR {}", error.empty() ? "screenshot failed" : error);
+
+		return fmt::format("OK width={} height={}\nPATH\t{}", width, height, clean_field(*decoded));
 	}
 
 	return fmt::format("ERR unknown command {}", verb);
