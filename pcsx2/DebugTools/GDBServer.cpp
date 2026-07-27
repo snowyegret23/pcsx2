@@ -9,6 +9,7 @@
 #include "MIPSAnalyst.h"
 #include "MTGS.h"
 #include "Patch.h"
+#include "SIO/Pad/Pad.h"
 #include "VMManager.h"
 
 #include "common/Console.h"
@@ -1811,6 +1812,61 @@ std::string GDBServer::runPcsx2Command(std::string_view command_view)
 	{
 		Host::RunOnCPUThread([]() { VMManager::WaitForSaveStateFlush(); }, true);
 		return "OK wait_savestate_flush";
+	}
+
+	if (verb == "input_set")
+	{
+		const std::vector<std::string> args = split_args(argument);
+		if (args.size() != 3)
+			return "ERR usage input_set <controller> <binding> <0..1000>";
+
+		int controller = 0;
+		int value_milli = 0;
+		if (!parse_int_arg(args[0], &controller) || controller < 0 ||
+			controller >= static_cast<int>(Pad::NUM_CONTROLLER_PORTS))
+		{
+			return "ERR invalid controller";
+		}
+		if (!parse_int_arg(args[2], &value_milli) || value_milli < 0 || value_milli > 1000)
+			return "ERR invalid value";
+
+		const Pad::ControllerInfo* const info = Pad::GetControllerInfo(EmuConfig.Pad.Ports[controller].Type);
+		const std::optional<u32> bind = info ? info->GetBindIndex(args[1]) : std::nullopt;
+		if (!bind.has_value())
+			return fmt::format("ERR unknown binding {}", args[1]);
+
+		const float value = static_cast<float>(value_milli) / 1000.0f;
+		Host::RunOnCPUThread([controller, bind = *bind, value]() {
+			Pad::SetControllerState(static_cast<u32>(controller), bind, value);
+		}, true);
+		return fmt::format("OK controller={} binding={} value={}", controller, args[1], value_milli);
+	}
+
+	if (verb == "input_reset")
+	{
+		int controller = 0;
+		if (!parse_int_arg(argument, &controller) || controller < 0 ||
+			controller >= static_cast<int>(Pad::NUM_CONTROLLER_PORTS))
+		{
+			return "ERR usage input_reset <controller>";
+		}
+
+		const Pad::ControllerInfo* const info = Pad::GetControllerInfo(EmuConfig.Pad.Ports[controller].Type);
+		if (!info)
+			return "ERR controller is not configured";
+
+		Host::RunOnCPUThread([controller, info]() {
+			for (const InputBindingInfo& binding : info->bindings)
+			{
+				if (binding.bind_type == InputBindingInfo::Type::Button ||
+					binding.bind_type == InputBindingInfo::Type::Axis ||
+					binding.bind_type == InputBindingInfo::Type::HalfAxis)
+				{
+					Pad::SetControllerState(static_cast<u32>(controller), binding.bind_index, 0.0f);
+				}
+			}
+		}, true);
+		return fmt::format("OK controller={} reset", controller);
 	}
 
 	if (verb == "screenshot_file")
